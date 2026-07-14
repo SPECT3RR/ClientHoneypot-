@@ -81,25 +81,33 @@ async def run_v2_session(target_url: str, headless: bool = True):
     if success:
         print("[+] Navigation successful. Handing control to Adaptive Weave Engine...")
         
-        # Start the scheduler tick loop which will weave until the session ends or hits a timeout
+        # Start the scheduler tick loop which will weave until the browser closes or hits DECOY
         try:
-            # Weave for 15 seconds to observe behavior
-            for _ in range(15):
+            # Weave indefinitely until page closes
+            while not browser._page.is_closed():
                 await interaction_scheduler.tick(browser._page)
                 if weave_controller.active_state == "DECOY":
                     print("[!] DECOY State detected! Breaking weave loop.")
                     break
-        except Exception as e:
-            print(f"[!] Weave error: {e}")
+        except (Exception, KeyboardInterrupt, asyncio.CancelledError) as e:
+            print(f"\n[!] Session interrupted by user (or error): {type(e).__name__}")
+            
+        finally:
+            print("\n[+] Tearing down session...")
+            try:
+                await browser.stop()
+            except Exception:
+                pass # Ignore Playwright connection drop on forced interrupt
+                
+            timeline_recorder.export()
+            await session_bus.stop()
+            print("[+] Live session complete.")
+            
     else:
         print("[-] Navigation failed.")
-        
-    print("\n[+] Tearing down session...")
-    await browser.stop()
-    
-    timeline_recorder.export()
-    await session_bus.stop()
-    print("[+] Live session complete.")
+        await browser.stop()
+        timeline_recorder.export()
+        await session_bus.stop()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the v2 Adaptive Weave Engine")

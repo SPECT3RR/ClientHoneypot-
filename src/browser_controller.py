@@ -40,14 +40,23 @@ class BrowserSession:
         self._context = await self._pw.chromium.launch_persistent_context(
             user_data_dir=str(user_data_dir),
             headless=self.headless,
-            args=["--disable-blink-features=AutomationControlled"],
-            ignore_default_args=["--enable-automation"],
+            args=["--disable-blink-features=AutomationControlled", "--test-type", "--disable-infobars", "--disable-popup-blocking"],
+            ignore_default_args=["--enable-automation", "--no-sandbox"],
             user_agent=self.persona.get("user_agent", "Mozilla/5.0"),
             viewport=self.persona.get("screen", {"width": 1920, "height": 1080}),
             locale=self.persona.get("locale", "en-US"),
             timezone_id=self.persona.get("timezone_id", "America/New_York"),
         )
         await self._context.add_init_script(fingerprint_init_script(self.persona))
+        await self._context.add_init_script("""
+            window.__lastHumanMove = Date.now();
+            document.addEventListener('mousemove', e => {
+                if (e.isTrusted) { window.__lastHumanMove = Date.now(); }
+            }, {capture: true});
+            document.addEventListener('keydown', e => {
+                if (e.isTrusted) { window.__lastHumanMove = Date.now(); }
+            }, {capture: true});
+        """)
         
         if self._context.pages:
             self._page = self._context.pages[0]
@@ -57,6 +66,7 @@ class BrowserSession:
         stealth = Stealth()
         await stealth.apply_stealth_async(self._page)
         self._wire_monitoring(self._page)
+        self._context.on("page", self._on_new_page)
         
         await self.bus.publish(Event(
             priority=10,
@@ -67,6 +77,17 @@ class BrowserSession:
         ))
 
     # ── monitoring hooks (Telemetry Collectors) ────────────────────────────────
+
+    def _on_new_page(self, page):
+        """Called whenever a new tab or pop-under opens."""
+        asyncio.create_task(self.bus.publish(Event(
+            priority=5,
+            category=EventCategory.NAVIGATION,
+            type="new_tab_opened",
+            payload={"url": page.url},
+            source="BrowserController"
+        )))
+        self._wire_monitoring(page)
 
     def _wire_monitoring(self, page):
         page.on("console",        self._on_console)

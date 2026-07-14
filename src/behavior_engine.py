@@ -62,9 +62,51 @@ async def occasional_idle(probability=0.2, min_s=2.0, max_s=6.0):
         await asyncio.sleep(random.uniform(min_s, max_s))
 
 
+async def random_click(page):
+    """Finds a random element or screen location and clicks it to trigger popunders/interactions."""
+    try:
+        # 123movies and similar sites use invisible overlays, a center-screen click often triggers it
+        viewport = page.viewport_size or {"width": 1280, "height": 800}
+        x = viewport["width"] / 2 + random.randint(-100, 100)
+        y = viewport["height"] / 2 + random.randint(-100, 100)
+        
+        await page.mouse.move(x, y, steps=10)
+        await asyncio.sleep(0.3)
+        await page.mouse.click(x, y)
+        print("[BehaviorEngine] Executed random page click (hunting for popunders/links).")
+    except Exception:
+        pass
+
 async def act_human(page):
     """Composite behavior pass used after each navigation."""
+    try:
+        await page.evaluate("""
+            if (!window.__virtualCursor) {
+                const cursor = document.createElement('div');
+                cursor.style.width = '20px';
+                cursor.style.height = '20px';
+                cursor.style.background = 'rgba(255, 0, 0, 0.8)';
+                cursor.style.position = 'absolute';
+                cursor.style.pointerEvents = 'none';
+                cursor.style.zIndex = '2147483647'; // Max z-index
+                cursor.style.borderRadius = '50%';
+                cursor.style.border = '2px solid white';
+                cursor.style.transition = 'top 0.05s linear, left 0.05s linear';
+                document.body.appendChild(cursor);
+                window.__virtualCursor = cursor;
+                
+                document.addEventListener('mousemove', e => {
+                    window.__virtualCursor.style.left = e.pageX + 'px';
+                    window.__virtualCursor.style.top = e.pageY + 'px';
+                });
+            }
+        """)
+    except Exception:
+        pass
+
     await random_mouse_wander(page)
     await random_scroll(page)
+    if random.random() < 0.8:
+        await random_click(page)
     await simulate_reading(page)
     await occasional_idle()
