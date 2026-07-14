@@ -1,0 +1,11 @@
+environment:
+  address: "127.0.0.1"
+  port: 8001
+  ssl: false
+assets:
+  - path: "/portal/login"
+    type: "credential_simulation"
+  - path: "/portal/files/aws_keys.txt"
+    type: "canary_token"
+tripwire:
+  alert_on_access: true

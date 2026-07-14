@@ -1,0 +1,9 @@
+micro_weaves:
+  enabled: true
+  bot_mouse_entropy: 0.8
+  bot_click_hesitation_ms: [200, 700]
+  bot_scroll_speed: [150, 400]
+  correction_window_ms: 500
+timing:
+  adaptive_timing: true
+  base_read_speed_wpm: 250

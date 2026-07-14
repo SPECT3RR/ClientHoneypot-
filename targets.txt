@@ -1,0 +1,20 @@
+# ============================================================
+# targets.txt — URL list for the Thug Deception Platform
+# ============================================================
+# One URL per line.
+# Lines starting with # are ignored.
+# Blank lines are ignored.
+#
+# Run with:
+#   python src/orchestrator.py --url-file targets.txt
+#   python src/orchestrator.py --url-file targets.txt --persona hr_generic
+#   python src/orchestrator.py --url-file targets.txt --headed
+#
+# Add your own URLs below:
+# ============================================================
+
+http://127.0.0.1:8080
+
+# Add more URLs below this line:
+# https://suspicious-site.example
+# https://another-target.example

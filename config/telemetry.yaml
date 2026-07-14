@@ -1,0 +1,11 @@
+collectors:
+  network: true
+  dom_snapshots: true
+  console_logs: true
+  storage: true
+  cookies: true
+  downloads: true
+  websocket: true
+rates:
+  dom_snapshot_interval_ms: 1000
+  screenshot_interval_ms: 2000

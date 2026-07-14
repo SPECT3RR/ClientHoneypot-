@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Employee Sign-In</h2>
+<form method="post" action="/portal/login">
+  <div><input type="text" name="username" placeholder="Username"></div>
+  <div><input type="password" name="password" placeholder="Password"></div>
+  <button type="submit">Sign in</button>
+</form>
+<p style="color:#6b7280; font-size:12px;">Asteria Holdings — internal use only. This environment is synthetic
+research infrastructure; no real credentials exist here.</p>
+{% endblock %}

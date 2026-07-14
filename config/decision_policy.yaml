@@ -1,0 +1,25 @@
+# Decision Policy Engine Configuration
+
+thresholds:
+  low_risk:
+    min_score: 0
+    max_score: 29
+    state: "BOT_ACTIVE"
+  medium_risk:
+    min_score: 30
+    max_score: 59
+    state: "SHARED_CONTROL"
+  high_risk:
+    min_score: 60
+    max_score: 89
+    state: "HUMAN_ACTIVE"
+  critical_risk:
+    min_score: 90
+    max_score: 100
+    state: "DECOY"
+
+evaluation_weights:
+  threat_score_trend: 0.4
+  behavioral_events: 0.3
+  page_classification: 0.2
+  human_inactivity: 0.1

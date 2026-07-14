@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.env
+
+# Runtime-generated artifacts (recreated per session)
+telemetry/session.db
+reports/*.json
+reports/*.html
+screenshots/*/
+config/persona_snapshots/*.json
+decoy_app/honeytokens/*.txt
+decoy_app/honeytokens/*.csv
+decoy_app/honeytokens/*.ovpn
+
+# Playwright
+/ms-playwright/

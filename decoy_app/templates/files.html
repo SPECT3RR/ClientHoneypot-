@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Shared File Server</h2>
+<table>
+  <tr><th>File</th><th>Modified</th></tr>
+  {% for f in files %}
+  <tr><td><a href="/portal/files/{{ f }}">{{ f }}</a></td><td>2026-06-{{ loop.index }}</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

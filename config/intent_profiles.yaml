@@ -1,0 +1,20 @@
+# Intent Profiles Library
+
+profiles:
+  professional:
+    domains:
+      - "linkedin.com"
+      - "github.com"
+      - "microsoft365.com"
+    sequences:
+      - hover_profile
+      - scroll_feed
+      - click_notification
+  consumer:
+    domains:
+      - "amazon.com"
+      - "ebay.com"
+    sequences:
+      - search_product
+      - scroll_reviews
+      - compare_prices

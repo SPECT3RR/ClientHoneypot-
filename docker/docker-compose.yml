@@ -1,0 +1,26 @@
+services:
+  decoy:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    entrypoint: ["python", "/app/decoy_app/app.py"]
+    ports:
+      - "8001:8001"
+    volumes:
+      - ../telemetry:/app/telemetry
+      - ../reports:/app/reports
+
+  controller:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    depends_on:
+      - decoy
+    volumes:
+      - ../telemetry:/app/telemetry
+      - ../reports:/app/reports
+      - ../screenshots:/app/screenshots
+      - ../config:/app/config
+    command: ["--urls", "https://example.com", "--persona", "finance_qatar"]
+    # Container is ephemeral: `docker compose down` destroys it and any
+    # in-container state (browser profile, temp files) along with it.

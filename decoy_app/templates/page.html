@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>{{ heading }}</h2>
+<p>{{ body }}</p>
+{% if items %}
+<table>
+  {% for item in items %}
+  <tr><td>{{ item }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endblock %}
