@@ -161,3 +161,26 @@ async def test_control_plane_mode_stays_alive_while_idle(tmp_path):
     swarm.kill()
     await asyncio.wait_for(task, timeout=5)
     db.close()
+
+
+def test_swarm_self_seeds_the_canary_vault(tmp_path):
+    """Bait that is not tracked is worthless: a callback months later must
+    still name the visit that planted it, which needs a stamped token."""
+    swarm, db = _swarm(tmp_path)
+    assert len(swarm.vault.for_placement("browser_profile")) == 3
+    db.close()
+
+
+def test_swarm_leaves_an_operator_filled_vault_alone(tmp_path):
+    from url_queue import URLQueue
+    from canary_vault import CanaryVault
+    from swarm import SwarmManager
+    db = VerdictDB(db_path=tmp_path / "v.db", session_id="dash")
+    vault = CanaryVault(db)
+    vault.add("aws_key", "AKIAREALCANARY", "browser_profile", label="real")
+
+    SwarmManager(URLQueue(rate_per_minute=600), db, vault,
+                 InterventionQueue(), headless=True)
+    rows = vault.for_placement("browser_profile")
+    assert len(rows) == 1 and rows[0]["value"] == "AKIAREALCANARY"
+    db.close()

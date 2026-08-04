@@ -27,6 +27,7 @@ from session_timeline import SessionTimelineRecorder
 from interventions import detect_block
 from link_crawler import LinkCrawler
 from nav_replay import build_journey
+from canary_vault import default_seed_tokens
 import substrate as substrate_mod
 
 
@@ -65,6 +66,16 @@ class SwarmManager:
         # machine has no boundary for. Never None: a missing substrate would
         # silently mean "no gate".
         self.substrate = substrate or substrate_mod.load()
+
+        # Self-seed the vault so swarm sessions plant *tracked* bait. Without
+        # this the seeder still writes synthetic credentials, but nothing is
+        # stamped with a session id — so a callback later could not be traced
+        # back to the visit that planted it, which is the whole point.
+        # Idempotent: a vault the operator has already filled is left alone.
+        minted = default_seed_tokens(self.vault)
+        if minted:
+            print(f"[swarm] minted {len(minted)} self-hosted bait tokens "
+                  f"(vault was empty)")
 
         self._target = target
         self._workers: dict = {}
