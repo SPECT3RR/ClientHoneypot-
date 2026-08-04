@@ -5,6 +5,11 @@ __pycache__/
 .Python
 .env
 
+# Browser profiles — NEVER commit these.
+# They hold cache, cookies, and service workers fetched from the malicious
+# sites we visit, i.e. attacker-controlled content. Recreated per session.
+config/profiles/
+
 # Runtime-generated artifacts (recreated per session)
 telemetry/session.db
 reports/*.json
