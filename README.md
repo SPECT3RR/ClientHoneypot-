@@ -29,13 +29,23 @@ listed below runs end-to-end on your machine with Python + Playwright:
 | Honey Assets / Honeytokens      | ✅ implemented | Fake AWS/SSH/DB creds, fake invoices/HR docs, each with a unique token ID |
 | Honeytoken access logging       | ✅ implemented | Any GET/read of a honeytoken file logs an alert with timestamp + session ID |
 | Telemetry Engine                | ✅ implemented | SQLite (`telemetry/session.db`) + per-session JSON |
-| Session Recorder                | ✅ implemented | Produces `reports/<session_id>.json` and a simple HTML summary |
-| Automated Cleanup               | ⚠️ partial | Per-session profile directory, wiped on session end; **does not** manage VMs/containers — see below |
-| Dashboard                       | ⚠️ minimal | Static HTML report per session, not a live multi-session dashboard |
-| MITRE ATT&CK mapping            | ⚠️ stub | Threat detector tags findings with a best-guess ATT&CK technique ID from a small lookup table, not a real mapping engine |
+| Session Recorder                | ✅ implemented | Per-session JSONL forensic timeline in `reports/` |
+| Automated Cleanup               | ✅ implemented | Per-session profile directory, wiped on session end |
+| **Bait seeder**                 | ✅ implemented | Arms the browser profile *before* navigation — Downloads, bookmarks, cookies, localStorage — where infostealers actually harvest |
+| **Canary vault**                | ✅ implemented | Operator-supplied tokens plus self-minted URL tokens; every placement stamped with its session, so a callback days later names the visit that planted it |
+| **Compromise detector**         | ✅ implemented | Nine typed action-of-compromise kinds. Behaviour-based, so it catches what a signature list cannot |
+| **Verdict database**            | ✅ implemented | SQLite URL verdicts with evidence + confidence; `/api/verdict` is the reputation endpoint the RBI modules consume |
+| **Decoy tiering**               | ✅ implemented | Tier 0 open, tier 1 behind a silent JS gate, tier 2 behind human classification; failures get a tarpit, never a 403 |
+| **Operator classifier**         | ✅ implemented | Bot vs human on mouse-path entropy and typing cadence — *not* `isTrusted`, which is true for CDP automation |
+| **Dashboard**                   | ✅ implemented | Live control plane: swarm target, intervention queue, canary vault, verdict browser, SSE alerts |
+| **Intervention queue**          | ✅ implemented | Blocked bots park and raise a hand; the operator clears the challenge and hands control back mid-session |
+| **Swarm manager**               | ✅ implemented | N concurrent workers converging on an operator-set target |
+| **Ad / redirect crawler**       | ✅ implemented | Directed clicking of links, iframes, ad slots; captures popups and records a navigation graph |
+| **Runtime substrate**           | ⚠️ partial | `local` (dev, refuses non-loopback targets) and `docker` (container inside the WSL2 VM). Firecracker seam present but needs a Linux/KVM host |
+| MITRE ATT&CK mapping            | ⚠️ stub | Best-guess technique IDs from a small lookup table, not a real mapping engine |
 | Elastic/TimescaleDB              | ❌ not implemented | SQLite only |
-| VM/Docker sandbox isolation      | ❌ not implemented | A `docker/` folder is provided to run the *controller* in a container, but true untrusted-browser isolation (gVisor/Firecracker/disposable VM) is out of scope for this drop — see "Isolation" below |
-| Thug integration                | ❌ not implemented | This MVP replaces Thug's role with Playwright directly; wiring in Thug as a secondary low-interaction pass is a documented next step |
+| Wazuh export                     | ❌ not implemented | Next module; events are already structured for it |
+| Thug integration                | ❌ not implemented | Playwright replaces Thug's role directly |
 
 ## Why some things are stubbed
 
@@ -59,43 +69,75 @@ what to build or bring in next (see "Roadmap").
 pip install -r requirements.txt
 playwright install chromium
 
-# Terminal 1: start the decoy enterprise environment
+# Terminal 1: the synthetic enterprise the payload gets diverted into
 python decoy_app/app.py
 
-# Terminal 2: run a session
-python src/v2_orchestrator.py http://127.0.0.1:8080 --headed
+# Terminal 2: the control plane  ->  http://127.0.0.1:8000
+python dashboard/app.py
+
+# Terminal 3 (optional): the mock malicious page to hunt
+python tests/mock_malicious_site.py
 ```
 
-> `src/orchestrator.py` (v1) does not run — its `BrowserSession` call predates the
-> v2 signature change. Use `src/v2_orchestrator.py`. v1 is removed in a later phase.
+Then in the dashboard: paste `http://127.0.0.1:8080/` into **Target queue**,
+set **bots** to 2, and watch the swarm detect, divert, and record a verdict.
 
-Run the test suite, including the end-to-end detection → decoy loop:
+Single session without the dashboard:
 
 ```bash
-python -m pytest tests/ -v
+python src/v2_orchestrator.py http://127.0.0.1:8080
+```
+
+Test suite, including the end-to-end detection → decoy loop against a real browser:
+
+```bash
+python -m pytest tests/ -q
 ```
 
 Output:
-- `telemetry/session.db` — raw event log (SQLite)
+- `telemetry/verdicts.db` — URL verdicts, compromise actions, canaries, hits
+- `telemetry/session.db` — raw event log
+- `reports/<session_id>_timeline.jsonl` — forensic timeline
 - `screenshots/<session_id>/` — PNGs per navigation step
-- `reports/<session_id>.json` — full structured report
-- `reports/<session_id>.html` — human-readable summary
 
 ## Isolation — read this before pointing it at real malicious URLs
 
-This MVP does **not** run the browser inside a disposable VM or gVisor/Firecracker
-sandbox. For actual malicious-URL research you must supply that isolation
-yourself, e.g.:
-- Run the whole `thug-deception-platform` container (see `docker/Dockerfile`)
-  inside a disposable VM snapshot you already control, with egress restricted
-  to the target research range.
-- Or run it in a cloud sandbox account with no route to any production network,
-  no real credentials, no VPN.
+**The platform now refuses to do this for you.** `config/runtime.yaml` selects a
+runtime substrate, and the default (`local`) rejects any target that is not
+loopback:
 
-The `docker/` folder isolates *process/filesystem* state per run (fresh
-container, fresh profile dir, destroyed on exit) but is **not** a security
-boundary against a browser exploit escaping to the host kernel. Treat it as
-convenience/repeatability isolation, not a sandbox.
+```
+[!] REFUSED: refusing to visit 'https://evil.example/' under the 'local'
+    substrate: no isolation boundary.
+```
+
+To hunt live targets, set `runtime.profile: docker`. Each session then runs in a
+container inside the **WSL2 utility VM** — a real Linux kernel in a lightweight
+VM, which is why it works on Windows 11 Home where Hyper-V and Windows Sandbox
+do not:
+
+```
+Windows host
+└── WSL2 utility VM              <- the security boundary
+    ├── hunt_net    : internet-facing, RFC1918 refused
+    └── decoy_net   : internal only, no route off the host
+```
+
+A browser exploit lands in the container; a container escape lands in the VM;
+reaching Windows needs a hypervisor or virtio-interop exploit — a different
+class of attacker than a drive-by kit. This is strong, **not absolute**. It is
+not a hardened microVM. `src/substrate.py` has the seam for Firecracker/gVisor,
+which need a Linux/KVM host this machine cannot provide.
+
+The `docker` profile also refuses RFC1918 targets outright: hunting must never
+touch your own network, however isolated the browser is.
+
+### Exposing the decoy
+
+For a real attacker to reach the decoy, something must be internet-reachable.
+From a home or office network that exposes *your* network. Ports bind to
+`127.0.0.1` only, and that is deliberate — use a tunnel that terminates outside
+your perimeter when you are ready, never a port-forward.
 
 ## Roadmap (not built here)
 

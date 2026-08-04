@@ -1,26 +1,68 @@
+# Layered containment for live hunting.
+#
+#   Windows host
+#   └── WSL2 utility VM              <- the actual security boundary
+#       ├── hunt_net    : internet-facing, inter-container talk disabled
+#       └── decoy_net   : internal only, no route off the host
+#
+# The two networks are the point. A payload that compromises a hunter must not
+# reach the LAN, and the decoy must not reach the internet — a decoy that can
+# phone out is an attacker's relay.
+#
+# Ports bind to 127.0.0.1 only. Exposing the decoy to the internet is a
+# deliberate, separate act (see README: use a tunnel that terminates outside
+# your perimeter), never a side effect of `docker compose up`.
+
 services:
+
   decoy:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    entrypoint: ["python", "/app/decoy_app/app.py"]
+    entrypoint: ["python", "decoy_app/app.py"]
+    networks: [decoy_net]
     ports:
-      - "8001:8001"
+      - "127.0.0.1:8001:8001"
     volumes:
       - ../telemetry:/app/telemetry
-      - ../reports:/app/reports
+    restart: unless-stopped
 
-  controller:
+  dashboard:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    depends_on:
-      - decoy
+    entrypoint: ["python", "dashboard/app.py"]
+    networks: [decoy_net, hunt_net]
+    ports:
+      - "127.0.0.1:8000:8000"
     volumes:
       - ../telemetry:/app/telemetry
       - ../reports:/app/reports
-      - ../screenshots:/app/screenshots
-      - ../config:/app/config
-    command: ["--urls", "https://example.com", "--persona", "finance_qatar"]
-    # Container is ephemeral: `docker compose down` destroys it and any
-    # in-container state (browser profile, temp files) along with it.
+    depends_on: [decoy]
+    restart: unless-stopped
+
+  # Hunting workers are launched per session by src/substrate.py rather than
+  # declared here: each needs its own throwaway container, profile, and bait.
+  # This entry exists to build and tag the image.
+  hunter:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: clienthoneypot/hunter:latest
+    networks: [hunt_net]
+    profiles: ["manual"]          # never started by `up`
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    tmpfs:
+      - /tmp
+    shm_size: 1gb                 # Chromium crashes on the 64 MB default
+
+networks:
+  hunt_net:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"
+  decoy_net:
+    driver: bridge
+    internal: true                # no route off the host at all

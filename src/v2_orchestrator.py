@@ -14,6 +14,7 @@ from behavioral_detector import BehavioralChallengeDetector
 from compromise_detector import CompromiseDetector
 from verdict_db import VerdictDB
 from canary_vault import CanaryVault, default_seed_tokens
+import substrate
 from decision_policy import DecisionPolicyEngine
 from ownership_manager import OwnershipManager
 from interaction_scheduler import InteractionScheduler
@@ -27,6 +28,15 @@ async def run_v2_session(target_url: str, headless: bool = True):
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     session_id = f"v2_live_session_{timestamp}"
     print(f"\n[+] Starting Live v2 Session for: {target_url} (Headless: {headless})")
+
+    runtime = substrate.load()
+    for line in substrate.preflight(runtime):
+        print(f"    {line}")
+    try:
+        runtime.assert_target_allowed(target_url)
+    except substrate.UnsafeTargetError as e:
+        print(f"\n[!] REFUSED: {e}")
+        return
     
     # 1. Initialize Event-Driven Backbone
     session_bus = EventBus()

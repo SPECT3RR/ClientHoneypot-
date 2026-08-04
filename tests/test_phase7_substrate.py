@@ -1,0 +1,109 @@
+import pytest
+
+import substrate as sub
+
+
+# ── the gate: the single most important behaviour in this module ───────────
+
+def test_local_profile_refuses_live_targets():
+    """An unisolated profile pointed at a real malicious URL is the exact
+    failure this module exists to prevent."""
+    s = sub.LocalSubstrate()
+    with pytest.raises(sub.UnsafeTargetError):
+        s.assert_target_allowed("https://malware.example/drive-by")
+    with pytest.raises(sub.UnsafeTargetError):
+        s.assert_target_allowed("http://198.51.100.7/payload")
+
+
+def test_local_profile_permits_the_mock_site():
+    s = sub.LocalSubstrate()
+    for url in ("http://127.0.0.1:8080/", "http://localhost:8080/a",
+                "http://[::1]:8080/"):
+        s.assert_target_allowed(url)
+
+
+def test_refusal_names_the_fix():
+    s = sub.LocalSubstrate()
+    with pytest.raises(sub.UnsafeTargetError) as e:
+        s.assert_target_allowed("https://evil.example/")
+    msg = str(e.value)
+    assert "docker" in msg and "runtime.yaml" in msg
+
+
+def test_isolated_profile_permits_live_targets():
+    s = sub.DockerSubstrate()
+    s.assert_target_allowed("https://malware.example/drive-by")
+
+
+def test_isolated_profile_still_refuses_your_own_network():
+    """Hunting must never touch the LAN, however isolated the browser is."""
+    s = sub.DockerSubstrate()
+    for url in ("http://192.168.1.10/", "http://10.0.0.5/x",
+                "http://172.16.4.4/y"):
+        with pytest.raises(sub.UnsafeTargetError):
+            s.assert_target_allowed(url)
+
+
+def test_loopback_is_allowed_even_on_the_isolated_profile():
+    # The decoy and the mock site are loopback and must stay reachable.
+    sub.DockerSubstrate().assert_target_allowed("http://127.0.0.1:8001/portal/login")
+
+
+# ── profile loading: safe by default ───────────────────────────────────────
+
+def test_default_profile_is_the_safe_one(tmp_path):
+    missing = tmp_path / "nope.yaml"
+    assert isinstance(sub.load(missing), sub.LocalSubstrate)
+
+
+def test_broken_config_does_not_silently_grant_permission(tmp_path):
+    """A malformed config must never fail open into live hunting."""
+    bad = tmp_path / "runtime.yaml"
+    bad.write_text("runtime: [this is not a mapping", encoding="utf-8")
+    s = sub.load(bad)
+    assert s.allows_live_targets is False
+
+
+def test_docker_profile_loads_from_config(tmp_path):
+    cfg = tmp_path / "runtime.yaml"
+    cfg.write_text(
+        "runtime:\n  profile: docker\n  docker:\n    network: custom_net\n",
+        encoding="utf-8")
+    s = sub.load(cfg)
+    assert isinstance(s, sub.DockerSubstrate)
+    assert s.network == "custom_net"
+    assert s.isolated is True
+
+
+def test_unknown_profile_is_rejected_loudly(tmp_path):
+    cfg = tmp_path / "runtime.yaml"
+    cfg.write_text("runtime:\n  profile: firecracker\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="unknown runtime profile"):
+        sub.load(cfg)
+
+
+def test_repo_config_ships_safe(tmp_path):
+    # The committed default must not be the one that permits live hunting.
+    assert sub.load().allows_live_targets is False
+
+
+# ── reporting ──────────────────────────────────────────────────────────────
+
+def test_preflight_warns_loudly_when_unisolated():
+    lines = "\n".join(sub.preflight(sub.LocalSubstrate()))
+    assert "isolated         : NO" in lines
+    assert "BLOCKED" in lines
+    assert "WARNING" in lines
+
+
+def test_docker_availability_is_reported_not_assumed():
+    ok, reason = sub.DockerSubstrate().available()
+    assert isinstance(ok, bool)
+    if not ok:
+        assert reason  # must say why, so the operator can fix it
+
+
+def test_describe_is_machine_readable():
+    d = sub.DockerSubstrate().describe()
+    assert d == {"profile": "docker", "isolated": True,
+                 "allows_live_targets": True}

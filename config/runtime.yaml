@@ -1,0 +1,19 @@
+# Where the honeyclient's browser is allowed to execute.
+#
+# 'local' is the safe default: no containment, and it REFUSES any target that
+# is not loopback. Development and the mock site only.
+#
+# Switch to 'docker' for live hunting. That runs each session in a container
+# inside the WSL2 utility VM — a real Linux kernel in a lightweight VM — so a
+# browser exploit or container escape lands there rather than on Windows.
+# Requires Docker Desktop to be running.
+#
+# 'firecracker' is not implemented: it needs a Linux/KVM host, which Windows 11
+# Home cannot provide. The interface in src/substrate.py is ready for it.
+
+runtime:
+  profile: local
+
+  docker:
+    image: clienthoneypot/hunter:latest
+    network: hunt_net

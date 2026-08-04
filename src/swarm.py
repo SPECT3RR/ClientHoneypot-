@@ -26,6 +26,7 @@ from browser_controller import BrowserSession
 from session_timeline import SessionTimelineRecorder
 from interventions import detect_block
 from link_crawler import LinkCrawler
+import substrate as substrate_mod
 
 
 class WorkerState:
@@ -52,13 +53,17 @@ class WorkerState:
 class SwarmManager:
     def __init__(self, queue, verdict_db, vault, interventions,
                  headless: bool = True, target: int = 0,
-                 crawl_depth: int = 2):
+                 crawl_depth: int = 2, substrate=None):
         self.queue = queue
         self.db = verdict_db
         self.vault = vault
         self.interventions = interventions
         self.headless = headless
         self.crawl_depth = crawl_depth
+        # Decides where a session may execute, and refuses targets this
+        # machine has no boundary for. Never None: a missing substrate would
+        # silently mean "no gate".
+        self.substrate = substrate or substrate_mod.load()
 
         self._target = target
         self._workers: dict = {}
@@ -147,6 +152,18 @@ class SwarmManager:
 
         state.url = entry.url
         state.status = "starting"
+
+        # Gate before anything is launched. An unisolated profile pointed at a
+        # live malicious URL is the failure this refuses to allow.
+        try:
+            self.substrate.assert_target_allowed(entry.url)
+        except substrate_mod.UnsafeTargetError as e:
+            state.status = "refused"
+            state.verdict = "refused"
+            self.completed += 1
+            print(f"[worker {state.worker_id}] REFUSED {entry.url}\n    {e}")
+            return
+
         stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         state.session_id = f"w{state.worker_id}_{stamp}_{random.randrange(16**4):04x}"
         state.persona = random.choice(list(PERSONA_LIBRARY))
