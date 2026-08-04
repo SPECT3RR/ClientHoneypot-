@@ -6,259 +6,459 @@
 <title>ClientHoneypot Control</title>
 <style>
   :root {
-    --bg:#0d1117; --panel:#161b22; --line:#30363d; --fg:#e6edf3;
-    --dim:#8b949e; --accent:#58a6ff; --bad:#f85149; --warn:#d29922;
-    --ok:#3fb950;
+    --bg:#0b0e14; --panel:#141922; --panel2:#1b2130; --line:#2a3244;
+    --fg:#e3e9f2; --dim:#7d8899;
+    --accent:#4d9fff; --bad:#ff5f56; --warn:#ffbd2e; --ok:#37d67a;
+    --hot:#ff2d55;
   }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--fg);
-         font:14px/1.5 ui-monospace,"Cascadia Code",Consolas,monospace; }
-  header { padding:14px 20px; border-bottom:1px solid var(--line);
-           display:flex; align-items:center; gap:20px; flex-wrap:wrap; }
-  h1 { font-size:15px; margin:0; letter-spacing:.5px; }
-  h2 { font-size:12px; margin:0 0 12px; color:var(--dim);
-       text-transform:uppercase; letter-spacing:1px; }
-  .grid { display:grid; gap:14px; padding:14px 20px;
-          grid-template-columns:repeat(auto-fit,minmax(400px,1fr)); }
+         font:13px/1.55 ui-monospace,"Cascadia Code",Consolas,monospace; }
+  a { color:var(--accent); }
+
+  /* ── state bar : the one thing you read first ───────────────────────── */
+  #statebar { display:flex; align-items:center; gap:18px; flex-wrap:wrap;
+              padding:12px 20px; border-bottom:1px solid var(--line);
+              background:var(--panel); position:sticky; top:0; z-index:10; }
+  #brand { font-size:13px; letter-spacing:1.5px; font-weight:600; }
+  #brand span { color:var(--dim); font-weight:400; }
+  #state { padding:5px 14px; border-radius:4px; font-weight:700;
+           letter-spacing:1.2px; font-size:12px; border:1px solid; }
+  .st-IDLE            { color:var(--dim);  border-color:var(--line); }
+  .st-HUNTING         { color:var(--accent); border-color:var(--accent);
+                        background:rgba(77,159,255,.10); }
+  .st-NEEDSOPERATOR   { color:var(--warn); border-color:var(--warn);
+                        background:rgba(255,189,46,.12); }
+  .st-ATTACKERENGAGED,
+  .st-CANARYFIRED     { color:#fff; border-color:var(--hot);
+                        background:var(--hot); animation:pulse 1.4s infinite; }
+  @keyframes pulse { 50% { opacity:.55; } }
+
+  .pill { padding:3px 10px; border-radius:3px; font-size:11px;
+          border:1px solid var(--line); color:var(--dim); }
+  .pill.danger { color:var(--bad); border-color:var(--bad);
+                 background:rgba(255,95,86,.10); }
+  .pill.safe   { color:var(--ok);  border-color:var(--ok); }
+  .counts { margin-left:auto; display:flex; gap:20px; color:var(--dim);
+            font-size:12px; }
+  .counts b { color:var(--fg); font-size:15px; }
+  #dot { width:7px; height:7px; border-radius:50%; background:var(--ok);
+         display:inline-block; margin-right:5px; }
+
+  /* ── layout ─────────────────────────────────────────────────────────── */
+  main { padding:16px 20px 40px; max-width:1700px; margin:0 auto; }
+  .band { margin-bottom:22px; }
+  .band > h3 { font-size:11px; letter-spacing:1.6px; color:var(--dim);
+               margin:0 0 10px; font-weight:600; text-transform:uppercase;
+               display:flex; align-items:center; gap:9px; }
+  .band > h3::after { content:""; flex:1; height:1px; background:var(--line); }
+  .cols { display:grid; gap:14px; }
+  .c2 { grid-template-columns:repeat(auto-fit,minmax(430px,1fr)); }
+  .c3 { grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); }
+
   .panel { background:var(--panel); border:1px solid var(--line);
-           border-radius:6px; padding:14px; }
-  .wide { grid-column:1/-1; }
+           border-radius:7px; padding:14px 15px; }
+  .panel.alert  { border-color:var(--warn); background:rgba(255,189,46,.05); }
+  .panel.hot    { border-color:var(--hot);  background:rgba(255,45,85,.06); }
+  .panel > h4 { margin:0 0 11px; font-size:12px; letter-spacing:.6px;
+                display:flex; align-items:center; gap:8px; }
+  .panel > h4 .sub { color:var(--dim); font-weight:400; letter-spacing:0;
+                     font-size:11px; }
+  .badge { background:var(--hot); color:#fff; border-radius:9px;
+           padding:1px 8px; font-size:11px; font-weight:700; }
+  .badge.zero { background:var(--line); color:var(--dim); }
+
   table { width:100%; border-collapse:collapse; font-size:12px; }
-  th { text-align:left; color:var(--dim); font-weight:normal;
-       border-bottom:1px solid var(--line); padding:5px 6px; }
-  td { padding:5px 6px; border-bottom:1px solid #21262d; }
-  .scroll { max-height:300px; overflow:auto; }
-  input,select,textarea,button { background:#0d1117; color:var(--fg);
-    border:1px solid var(--line); border-radius:5px; padding:6px 9px;
+  th { text-align:left; color:var(--dim); font-weight:500; padding:5px 7px;
+       border-bottom:1px solid var(--line); font-size:11px;
+       letter-spacing:.4px; }
+  td { padding:6px 7px; border-bottom:1px solid rgba(42,50,68,.55); }
+  tr:last-child td { border-bottom:none; }
+  .scroll { max-height:290px; overflow:auto; }
+  .scroll::-webkit-scrollbar { width:8px; }
+  .scroll::-webkit-scrollbar-thumb { background:var(--line); border-radius:4px; }
+
+  input,select,textarea,button { background:var(--panel2); color:var(--fg);
+    border:1px solid var(--line); border-radius:5px; padding:6px 10px;
     font:inherit; font-size:12px; }
-  button { cursor:pointer; border-color:#3d444d; }
+  input:focus,select:focus,textarea:focus { outline:none;
+    border-color:var(--accent); }
+  button { cursor:pointer; }
   button:hover { border-color:var(--accent); color:var(--accent); }
-  button.danger:hover { border-color:var(--bad); color:var(--bad); }
-  form.row { display:flex; gap:7px; flex-wrap:wrap; align-items:center; }
-  .stat { display:inline-block; margin-right:22px; }
-  .stat b { font-size:20px; display:block; font-weight:600; }
-  .stat span { color:var(--dim); font-size:11px; text-transform:uppercase;
-               letter-spacing:.5px; }
-  .tag { padding:1px 7px; border-radius:9px; font-size:11px;
-         border:1px solid var(--line); }
-  .malicious { color:var(--bad); border-color:var(--bad); }
-  .suspicious { color:var(--warn); border-color:var(--warn); }
-  .clean { color:var(--ok); border-color:var(--ok); }
-  .parked,.blocked { color:var(--warn); }
-  .decoy { color:var(--bad); font-weight:600; }
+  button.primary { background:var(--accent); border-color:var(--accent);
+                   color:#08111f; font-weight:600; }
+  button.primary:hover { filter:brightness(1.12); color:#08111f; }
+  button.danger { border-color:#5a2c2c; color:#e08b86; }
+  button.danger:hover { border-color:var(--bad); color:var(--bad);
+                        background:rgba(255,95,86,.10); }
+  label.f { display:block; color:var(--dim); font-size:11px; margin-bottom:4px; }
+  .field { margin-bottom:9px; }
+  .inline { display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap; }
+  .inline > div { flex:1; min-width:110px; }
+
+  .tag { padding:1px 8px; border-radius:9px; font-size:11px;
+         border:1px solid var(--line); white-space:nowrap; }
+  .malicious { color:var(--bad); border-color:var(--bad);
+               background:rgba(255,95,86,.08); }
+  .suspicious{ color:var(--warn); border-color:var(--warn); }
+  .clean     { color:var(--ok); border-color:var(--ok); }
+  .refused   { color:var(--dim); }
+  .human_operator { color:#fff; background:var(--hot); border-color:var(--hot);
+                    font-weight:600; }
+  .bot     { color:var(--dim); }
+  .unclear { color:var(--warn); border-color:var(--warn); }
+
+  .decoy,.compromised { color:var(--bad); font-weight:600; }
   .hunting { color:var(--accent); }
-  .done { color:var(--dim); }
-  .muted { color:var(--dim); }
-  .url { max-width:340px; overflow:hidden; text-overflow:ellipsis;
+  .parked  { color:var(--warn); }
+  .done    { color:var(--dim); }
+  .error   { color:var(--bad); }
+  .muted   { color:var(--dim); }
+  .url { max-width:300px; overflow:hidden; text-overflow:ellipsis;
          white-space:nowrap; display:inline-block; vertical-align:bottom; }
-  #dot { width:8px; height:8px; border-radius:50%; background:var(--ok);
-         display:inline-block; }
+  .empty { color:var(--dim); font-style:italic; padding:14px 4px;
+           text-align:center; }
+  code { background:var(--panel2); padding:1px 5px; border-radius:3px;
+         font-size:11px; }
 </style>
 </head>
 <body>
-<header>
-  <h1>CLIENTHONEYPOT <span class="muted">/ control</span></h1>
-  <span><span id="dot"></span> <span id="conn" class="muted">live</span></span>
-  <span class="muted" id="hdr">
-    {{ swarm.live }}/{{ swarm.target }} bots &middot; {{ swarm.queued }} queued
-    &middot; {{ interventions|length }} interventions
+
+<!-- ══ STATE ═══════════════════════════════════════════════════════════ -->
+<div id="statebar">
+  <span id="brand">CLIENTHONEYPOT <span>/ control</span></span>
+  <span id="state" class="st-{{ state|replace(' ','') }}">{{ state }}</span>
+
+  {% if containment.isolated %}
+    <span class="pill safe" title="Sessions run in a container inside the WSL2 VM">
+      CONTAINED &middot; {{ containment.profile }}</span>
+  {% else %}
+    <span class="pill danger" title="Browser runs on this host. Loopback targets only.">
+      NOT CONTAINED &middot; {{ containment.profile }}</span>
+  {% endif %}
+  {% if not containment.live_allowed %}
+    <span class="pill">loopback only</span>
+  {% endif %}
+
+  <span class="counts">
+    <span><b id="s-live">{{ swarm.live }}</b>/<span id="s-target">{{ swarm.target }}</span> bots</span>
+    <span><b id="s-queued">{{ swarm.queued }}</b> queued</span>
+    <span><b id="s-done">{{ swarm.completed }}</b> done</span>
+    <span><span id="dot"></span><span id="conn">live</span></span>
   </span>
-</header>
+</div>
 
-<div class="grid">
+<main>
 
-  <!-- swarm ------------------------------------------------------------ -->
-  <div class="panel">
-    <h2>Swarm control</h2>
-    <div style="margin-bottom:12px">
-      <div class="stat"><b id="s-live">{{ swarm.live }}</b><span>live</span></div>
-      <div class="stat"><b id="s-target">{{ swarm.target }}</b><span>target</span></div>
-      <div class="stat"><b id="s-parked">{{ swarm.parked }}</b><span>parked</span></div>
-      <div class="stat"><b id="s-done">{{ swarm.completed }}</b><span>done</span></div>
-      <div class="stat"><b id="s-queued">{{ swarm.queued }}</b><span>queued</span></div>
-    </div>
-    <form class="row" method="post" action="/swarm/target">
-      <label class="muted">bots</label>
-      <input type="number" name="bots" min="0" max="50" value="{{ swarm.target }}" style="width:70px">
-      <button type="submit">Set target</button>
-      <span class="muted">parked bots don't consume capacity</span>
-    </form>
-    <form method="post" action="/swarm/kill" style="margin-top:8px">
-      <button class="danger" type="submit">Kill switch</button>
-    </form>
-    <div class="scroll" style="margin-top:12px">
+<!-- ══ NEEDS YOU NOW ═══════════════════════════════════════════════════ -->
+<div class="band">
+  <h3>Needs you now</h3>
+  <div class="cols c2">
+
+    <div class="panel {% if interventions %}alert{% endif %}">
+      <h4>Blocked bots
+        <span class="badge {% if not interventions %}zero{% endif %}"
+              id="b-int">{{ interventions|length }}</span>
+        <span class="sub">a bot hit a wall and is holding the tab for you</span>
+      </h4>
+      {% if interventions %}
       <table>
-        <thead><tr><th>#</th><th>status</th><th>url</th><th>score</th><th>verdict</th></tr></thead>
-        <tbody id="workers">
-        {% for w in swarm.workers %}
-          <tr><td>{{ w.worker_id }}</td>
-              <td class="{{ w.status }}">{{ w.status }}</td>
-              <td><span class="url">{{ w.url or '' }}</span></td>
-              <td>{{ w.score }}</td>
-              <td>{{ w.verdict or '' }}</td></tr>
-        {% else %}
-          <tr><td colspan="5" class="muted">no workers — set a target above</td></tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- queue ------------------------------------------------------------ -->
-  <div class="panel">
-    <h2>Target queue</h2>
-    <form method="post" action="/queue/add">
-      <textarea name="urls" rows="7" style="width:100%"
-        placeholder="One URL per line. # comments ignored.&#10;http://127.0.0.1:8080"></textarea>
-      <button type="submit" style="margin-top:8px">Queue URLs</button>
-    </form>
-    <p class="muted" style="font-size:11px">
-      Phase 7 gates live hunting. Until the WSL2 substrate is in place, point
-      this only at <code>tests/mock_malicious_site.py</code>.
-    </p>
-  </div>
-
-  <!-- interventions ----------------------------------------------------- -->
-  <div class="panel wide">
-    <h2>Intervention queue &mdash; bots waiting on a human</h2>
-    <table>
-      <thead><tr><th>#</th><th>url</th><th>reason</th><th>age</th><th>shot</th><th></th></tr></thead>
-      <tbody id="interventions">
-      {% for i in interventions %}
-        <tr><td>{{ i.id }}</td>
+        <thead><tr><th>#</th><th>target</th><th>why</th><th>waiting</th><th></th></tr></thead>
+        <tbody>
+        {% for i in interventions %}
+          <tr>
+            <td>{{ i.id }}</td>
             <td><span class="url">{{ i.url }}</span></td>
-            <td class="warn">{{ i.reason }}</td>
+            <td class="parked">{{ i.reason }}</td>
             <td>{{ i.age_seconds }}s</td>
-            <td>{% if i.screenshot %}<span class="muted">captured</span>{% endif %}</td>
-            <td>
-              <form class="row" method="post" action="/intervention/{{ i.id }}/resolve">
-                <button type="submit">Took over &mdash; resume bot</button>
+            <td style="white-space:nowrap">
+              <form method="post" action="/intervention/{{ i.id }}/resolve"
+                    style="display:inline">
+                <button class="primary" type="submit">Solved &rarr; resume</button>
               </form>
-              <form class="row" method="post" action="/intervention/{{ i.id }}/skip">
+              <form method="post" action="/intervention/{{ i.id }}/skip"
+                    style="display:inline">
                 <button class="danger" type="submit">Skip</button>
               </form>
-            </td></tr>
-      {% else %}
-        <tr><td colspan="6" class="muted">no bots blocked</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-
-  <!-- canary vault ------------------------------------------------------ -->
-  <div class="panel">
-    <h2>Canary vault
-      <span class="muted">&mdash; {{ canary_stats.total }} tokens,
-      {{ canary_stats.burned }} burned, {{ canary_stats.hits }} hits</span></h2>
-
-    <form class="row" method="post" action="/canary/add" style="margin-bottom:8px">
-      <select name="kind">{% for k in kinds %}<option>{{ k }}</option>{% endfor %}</select>
-      <input name="value" placeholder="paste token value" style="flex:1;min-width:150px">
-      <input name="label" placeholder="label" style="width:110px">
-      <select name="placement">{% for p in placements %}<option>{{ p }}</option>{% endfor %}</select>
-      <button type="submit">Add</button>
-    </form>
-
-    <form class="row" method="post" action="/canary/mint">
-      <span class="muted">or mint a self-hosted one:</span>
-      <select name="placement">{% for p in placements %}<option>{{ p }}</option>{% endfor %}</select>
-      <input name="label" placeholder="label" style="width:110px">
-      <button type="submit">Mint</button>
-    </form>
-
-    <div class="scroll" style="margin-top:12px">
-      <table>
-        <thead><tr><th>label</th><th>kind</th><th>placement</th><th>session</th><th></th></tr></thead>
-        <tbody>
-        {% for c in canaries %}
-          <tr><td>{{ c.label or '—' }}</td><td>{{ c.kind }}</td>
-              <td>{{ c.placement }}</td>
-              <td class="muted"><span class="url">{{ c.session_id or 'unplaced' }}</span></td>
-              <td><form method="post" action="/canary/{{ c.token_id }}/delete">
-                    <button class="danger" type="submit">×</button></form></td></tr>
-        {% else %}
-          <tr><td colspan="5" class="muted">vault empty — sessions self-seed</td></tr>
+            </td>
+          </tr>
         {% endfor %}
         </tbody>
       </table>
+      {% else %}
+        <div class="empty">no bots blocked</div>
+      {% endif %}
     </div>
-  </div>
 
-  <!-- canary hits ------------------------------------------------------- -->
-  <div class="panel">
-    <h2>Canary hits <span class="muted">&mdash; bait used from attacker infra</span></h2>
-    <div class="scroll">
+    <div class="panel {% if visitors.humans or canary_hits %}hot{% endif %}">
+      <h4>Attacker engagement
+        <span class="badge {% if not visitors.humans %}zero{% endif %}"
+              id="b-hum">{{ visitors.humans|length }}</span>
+        <span class="sub">humans inside the decoy, and bait that has fired</span>
+      </h4>
+
+      {% if visitors.offline %}
+        <div class="empty">decoy offline &mdash; start <code>python decoy_app/app.py</code></div>
+      {% elif visitors.humans %}
+        <table>
+          <thead><tr><th>visitor</th><th>score</th><th>tier</th><th>evidence</th></tr></thead>
+          <tbody>
+          {% for h in visitors.humans %}
+            <tr><td><span class="url">{{ h.src_ip or h.visitor_id }}</span></td>
+                <td><span class="tag human_operator">{{ h.score }}</span></td>
+                <td>{{ h.tier_reached }}</td>
+                <td class="muted"><span class="url">{{ h.signals|join(', ') }}</span></td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty">no human operator has reached the decoy</div>
+      {% endif %}
+
+      {% if canary_hits %}
+      <h4 style="margin-top:14px">Canary hits
+        <span class="sub">bait used from attacker infrastructure</span></h4>
+      <div class="scroll" style="max-height:150px">
       <table>
-        <thead><tr><th>label</th><th>src ip</th><th>user-agent</th><th>planted in</th></tr></thead>
+        <thead><tr><th>token</th><th>src ip</th><th>user-agent</th><th>planted in</th></tr></thead>
         <tbody>
         {% for h in canary_hits %}
-          <tr><td class="malicious">{{ h.label or h.kind }}</td>
+          <tr><td><span class="tag malicious">{{ h.label or h.kind }}</span></td>
               <td>{{ h.src_ip }}</td>
               <td><span class="url">{{ h.user_agent }}</span></td>
               <td class="muted"><span class="url">{{ h.session_id }}</span></td></tr>
-        {% else %}
-          <tr><td colspan="4" class="muted">no canary has fired yet</td></tr>
         {% endfor %}
         </tbody>
       </table>
+      </div>
+      {% endif %}
     </div>
-  </div>
 
-  <!-- verdicts ---------------------------------------------------------- -->
-  <div class="panel wide">
-    <h2>URL verdicts
-      <span class="muted">&mdash; {{ db_stats.total }} urls,
-      {{ db_stats.get('malicious', 0) }} malicious,
-      {{ db_stats.compromise_actions }} compromise actions
-      &middot; reputation API: <code>/api/verdict?url=…</code></span></h2>
-    <div class="scroll">
-      <table>
-        <thead><tr><th>url</th><th>verdict</th><th>score</th><th>visits</th><th>host</th></tr></thead>
-        <tbody>
-        {% for v in verdicts %}
-          <tr><td><span class="url">{{ v.url }}</span></td>
-              <td><span class="tag {{ v.verdict }}">{{ v.verdict }}</span></td>
-              <td>{{ v.max_score }}</td><td>{{ v.visit_count }}</td>
-              <td class="muted">{{ v.host }}</td></tr>
-        {% else %}
-          <tr><td colspan="5" class="muted">no sessions recorded yet</td></tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </div>
   </div>
-
-  <!-- alerts ------------------------------------------------------------ -->
-  <div class="panel wide">
-    <h2>Live alerts</h2>
-    <div class="scroll"><table><tbody id="alerts">
-      {% for a in alerts %}
-        <tr><td style="width:110px" class="muted">{{ a.kind }}</td><td>{{ a.message }}</td></tr>
-      {% else %}
-        <tr><td class="muted">nothing yet</td></tr>
-      {% endfor %}
-    </tbody></table></div>
-  </div>
-
 </div>
 
-<script>
-const src = new EventSource('/events');
-const $ = id => document.getElementById(id);
+<!-- ══ OPERATE ═════════════════════════════════════════════════════════ -->
+<div class="band">
+  <h3>Operate</h3>
+  <div class="cols c3">
 
-src.onopen = () => { $('conn').textContent = 'live'; $('dot').style.background = 'var(--ok)'; };
-src.onerror = () => { $('conn').textContent = 'reconnecting'; $('dot').style.background = 'var(--bad)'; };
+    <div class="panel">
+      <h4>Swarm</h4>
+      <form method="post" action="/swarm/target" class="inline">
+        <div style="flex:0 0 90px">
+          <label class="f">bot target</label>
+          <input type="number" name="bots" min="0" max="50"
+                 value="{{ swarm.target }}" style="width:100%">
+        </div>
+        <div style="flex:0 0 auto"><button class="primary" type="submit">Apply</button></div>
+      </form>
+      <p class="muted" style="font-size:11px;margin:9px 0">
+        Parked bots don't consume capacity &mdash; a bot waiting on you never
+        starves the swarm.
+      </p>
+      <form method="post" action="/swarm/kill">
+        <button class="danger" type="submit">Kill switch &mdash; stop everything</button>
+      </form>
+    </div>
+
+    <div class="panel">
+      <h4>Target queue <span class="sub">one URL per line</span></h4>
+      <form method="post" action="/queue/add">
+        <textarea name="urls" rows="4" style="width:100%"
+                  placeholder="http://127.0.0.1:8080/"></textarea>
+        <button class="primary" type="submit" style="margin-top:8px">Queue</button>
+      </form>
+      {% if not containment.live_allowed %}
+      <p class="muted" style="font-size:11px;margin-top:9px">
+        <span class="pill danger">loopback only</span>
+        Set <code>runtime.profile: docker</code> in
+        <code>config/runtime.yaml</code> to hunt live targets.
+      </p>
+      {% endif %}
+    </div>
+
+    <div class="panel">
+      <h4>Workers</h4>
+      <div class="scroll" style="max-height:200px">
+        <table>
+          <thead><tr><th>#</th><th>status</th><th>target</th><th>score</th><th>verdict</th></tr></thead>
+          <tbody id="workers">
+          {% for w in swarm.workers %}
+            <tr><td>{{ w.worker_id }}</td>
+                <td class="{{ w.status.split(' ')[0] }}">{{ w.status }}</td>
+                <td><span class="url">{{ w.url or '' }}</span></td>
+                <td>{{ w.score }}</td>
+                <td>{% if w.verdict %}<span class="tag {{ w.verdict }}">{{ w.verdict }}</span>{% endif %}</td></tr>
+          {% else %}
+            <tr><td colspan="5" class="empty">idle &mdash; set a bot target</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══ INTELLIGENCE ════════════════════════════════════════════════════ -->
+<div class="band">
+  <h3>Intelligence</h3>
+  <div class="cols c2">
+
+    <div class="panel">
+      <h4>URL verdicts
+        <span class="sub">{{ db_stats.total }} urls &middot;
+          {{ db_stats.get('malicious', 0) }} malicious &middot;
+          {{ db_stats.compromise_actions }} compromise actions</span></h4>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>url</th><th>verdict</th><th>score</th><th>seen</th></tr></thead>
+          <tbody>
+          {% for v in verdicts %}
+            <tr><td><span class="url">{{ v.url }}</span></td>
+                <td><span class="tag {{ v.verdict }}">{{ v.verdict }}</span></td>
+                <td>{{ v.max_score }}</td>
+                <td class="muted">{{ v.visit_count }}&times;</td></tr>
+          {% else %}
+            <tr><td colspan="4" class="empty">no sessions recorded yet</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="muted" style="font-size:11px;margin:9px 0 0">
+        Reputation API for the RBI modules:
+        <code>GET /api/verdict?url=…</code> &mdash; returns verdict plus the
+        evidence behind it.
+      </p>
+    </div>
+
+    <div class="panel">
+      <h4>Canary vault
+        <span class="sub">{{ canary_stats.total }} tokens &middot;
+          {{ canary_stats.burned }} burned &middot;
+          {{ canary_stats.hits }} hits</span></h4>
+
+      <form method="post" action="/canary/add">
+        <div class="inline">
+          <div style="flex:0 0 130px">
+            <label class="f">kind</label>
+            <select name="kind" style="width:100%">
+              {% for k in kinds %}<option>{{ k }}</option>{% endfor %}</select>
+          </div>
+          <div style="flex:2">
+            <label class="f">token value</label>
+            <input name="value" placeholder="paste from canarytokens.org" style="width:100%">
+          </div>
+        </div>
+        <div class="inline" style="margin-top:8px">
+          <div><label class="f">label</label>
+               <input name="label" placeholder="aws-prod" style="width:100%"></div>
+          <div><label class="f">placement</label>
+               <select name="placement" style="width:100%">
+                 {% for p in placements %}<option>{{ p }}</option>{% endfor %}</select></div>
+          <div style="flex:0 0 auto"><button class="primary" type="submit">Add</button></div>
+        </div>
+      </form>
+
+      <form method="post" action="/canary/mint" class="inline"
+            style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">
+        <div style="flex:0 0 auto"><span class="muted" style="font-size:11px">
+          no token handy?</span></div>
+        <div><select name="placement" style="width:100%">
+              {% for p in placements %}<option>{{ p }}</option>{% endfor %}</select></div>
+        <div><input name="label" placeholder="label" style="width:100%"></div>
+        <div style="flex:0 0 auto"><button type="submit">Mint self-hosted</button></div>
+      </form>
+
+      <div class="scroll" style="margin-top:11px;max-height:170px">
+        <table>
+          <thead><tr><th>label</th><th>kind</th><th>placement</th><th>planted in</th><th></th></tr></thead>
+          <tbody>
+          {% for c in canaries %}
+            <tr><td>{{ c.label or '—' }}</td>
+                <td class="muted">{{ c.kind }}</td>
+                <td class="muted">{{ c.placement }}</td>
+                <td class="muted"><span class="url">{{ c.session_id or 'unplaced' }}</span></td>
+                <td><form method="post" action="/canary/{{ c.token_id }}/delete">
+                      <button class="danger" type="submit"
+                              style="padding:1px 7px">&times;</button></form></td></tr>
+          {% else %}
+            <tr><td colspan="5" class="empty">vault empty &mdash; sessions self-seed</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══ DECOY + STREAM ══════════════════════════════════════════════════ -->
+<div class="band">
+  <h3>Decoy &amp; activity</h3>
+  <div class="cols c2">
+
+    <div class="panel">
+      <h4>Decoy visitors <span class="sub">everyone who touched the portal</span></h4>
+      <div class="scroll" style="max-height:230px">
+        <table>
+          <thead><tr><th>visitor</th><th>class</th><th>score</th><th>js</th><th>tier</th></tr></thead>
+          <tbody id="visitors">
+          {% for v in visitors.visitors %}
+            <tr><td><span class="url">{{ v.src_ip or v.visitor_id }}</span></td>
+                <td><span class="tag {{ v.classification }}">{{ v.classification }}</span></td>
+                <td>{{ v.score }}</td>
+                <td class="muted">{{ 'yes' if v.js_solved else 'no' }}</td>
+                <td>{{ v.tier_reached }}</td></tr>
+          {% else %}
+            <tr><td colspan="5" class="empty">
+              {% if visitors.offline %}decoy offline{% else %}nobody has touched the decoy{% endif %}
+            </td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h4>Live activity</h4>
+      <div class="scroll" style="max-height:230px">
+        <table><tbody id="alerts">
+        {% for a in alerts %}
+          <tr><td style="width:100px" class="muted">{{ a.kind }}</td>
+              <td>{{ a.message }}</td></tr>
+        {% else %}
+          <tr><td class="empty">nothing yet</td></tr>
+        {% endfor %}
+        </tbody></table>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const src = new EventSource('/events');
+
+src.onopen  = () => { $('conn').textContent = 'live';
+                      $('dot').style.background = 'var(--ok)'; };
+src.onerror = () => { $('conn').textContent = 'reconnecting';
+                      $('dot').style.background = 'var(--bad)'; };
 
 src.onmessage = e => {
   const d = JSON.parse(e.data);
   if (d.kind === 'status') { paintStatus(d); return; }
 
-  const row = document.createElement('tr');
-  row.innerHTML = `<td style="width:110px" class="muted">${d.kind}</td><td>${escapeHtml(d.message)}</td>`;
   const body = $('alerts');
-  if (body.firstElementChild && body.firstElementChild.querySelector('.muted:only-child')) body.innerHTML = '';
+  if (body.querySelector('.empty')) body.innerHTML = '';
+  const row = document.createElement('tr');
+  row.innerHTML = `<td style="width:100px" class="muted">${esc(d.kind)}</td>` +
+                  `<td>${esc(d.message)}</td>`;
   body.prepend(row);
-  while (body.children.length > 60) body.lastElementChild.remove();
+  while (body.children.length > 80) body.lastElementChild.remove();
 
   // A raised hand needs the operator's eyes now, not on the next refresh.
   if (d.kind === 'intervention' && d.detail && d.detail.status === 'open') {
@@ -269,20 +469,45 @@ src.onmessage = e => {
 function paintStatus(s) {
   $('s-live').textContent   = s.live;
   $('s-target').textContent = s.target;
-  $('s-parked').textContent = s.parked;
-  $('s-done').textContent   = s.completed;
   $('s-queued').textContent = s.queued;
-  $('hdr').textContent = `${s.live}/${s.target} bots · ${s.queued} queued`;
+  $('s-done').textContent   = s.completed;
 
-  const body = $('workers');
-  if (!s.workers.length) return;
-  body.innerHTML = s.workers.map(w =>
-    `<tr><td>${w.worker_id}</td><td class="${w.status}">${w.status}</td>` +
-    `<td><span class="url">${escapeHtml(w.url || '')}</span></td>` +
-    `<td>${w.score}</td><td>${escapeHtml(w.verdict || '')}</td></tr>`).join('');
+  const el = $('state');
+  if (el.textContent !== s.state) {
+    el.textContent = s.state;
+    el.className = 'st-' + s.state.replace(/ /g, '');
+  }
+  setBadge('b-int', s.interventions);
+  setBadge('b-hum', s.humans);
+
+  if (s.workers && s.workers.length) {
+    $('workers').innerHTML = s.workers.map(w =>
+      `<tr><td>${w.worker_id}</td>` +
+      `<td class="${esc((w.status||'').split(' ')[0])}">${esc(w.status)}</td>` +
+      `<td><span class="url">${esc(w.url || '')}</span></td>` +
+      `<td>${w.score}</td>` +
+      `<td>${w.verdict ? `<span class="tag ${esc(w.verdict)}">${esc(w.verdict)}</span>` : ''}</td></tr>`
+    ).join('');
+  }
+
+  if (s.visitors && s.visitors.length) {
+    $('visitors').innerHTML = s.visitors.map(v =>
+      `<tr><td><span class="url">${esc(v.src_ip || v.visitor_id)}</span></td>` +
+      `<td><span class="tag ${esc(v.classification)}">${esc(v.classification)}</span></td>` +
+      `<td>${v.score}</td>` +
+      `<td class="muted">${v.js_solved ? 'yes' : 'no'}</td>` +
+      `<td>${v.tier_reached}</td></tr>`
+    ).join('');
+  }
 }
 
-function escapeHtml(s) {
+function setBadge(id, n) {
+  const b = $(id); if (!b) return;
+  b.textContent = n;
+  b.className = 'badge' + (n ? '' : ' zero');
+}
+
+function esc(s) {
   return String(s).replace(/[&<>"']/g, c =>
     ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }

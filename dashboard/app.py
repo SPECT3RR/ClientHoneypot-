@@ -26,6 +26,10 @@ from canary_vault import CanaryVault, PLACEMENTS, KINDS  # noqa: E402
 from interventions import InterventionQueue    # noqa: E402
 from url_queue import URLQueue                 # noqa: E402
 from swarm import SwarmManager                 # noqa: E402
+import substrate as substrate_mod              # noqa: E402
+import urllib.request                          # noqa: E402
+
+DECOY_BASE = "http://127.0.0.1:8001"
 
 APP_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
@@ -36,7 +40,47 @@ DB = VerdictDB(session_id="dashboard")
 VAULT = CanaryVault(DB)
 QUEUE = URLQueue(rate_per_minute=30)
 INTERVENTIONS = InterventionQueue(db=DB)
-SWARM = SwarmManager(QUEUE, DB, VAULT, INTERVENTIONS, headless=True, target=0)
+SUBSTRATE = substrate_mod.load()
+SWARM = SwarmManager(QUEUE, DB, VAULT, INTERVENTIONS, headless=True, target=0,
+                     substrate=SUBSTRATE)
+
+
+def decoy_visitors() -> dict:
+    """Who is currently touching the decoy, and how they were classified.
+
+    This is the attacker-engagement view. It lived only on the decoy app and
+    was never surfaced, so the operator had no way to see the one thing the
+    platform exists to observe.
+    """
+    try:
+        with urllib.request.urlopen(f"{DECOY_BASE}/_visitors", timeout=2) as r:
+            return json.loads(r.read())
+    except Exception:
+        return {"visitors": [], "humans": [], "offline": True}
+
+
+def containment() -> dict:
+    ok, reason = SUBSTRATE.available()
+    return {"profile": SUBSTRATE.name, "isolated": SUBSTRATE.isolated,
+            "live_allowed": SUBSTRATE.allows_live_targets,
+            "ready": ok, "reason": reason}
+
+
+def system_state(interventions: list, visitors: dict, hits: list) -> str:
+    """One word for the top of the screen, worst-first.
+
+    An operator should never have to read five panels to learn that someone
+    is inside the decoy right now.
+    """
+    if hits:
+        return "CANARY FIRED"
+    if visitors.get("humans"):
+        return "ATTACKER ENGAGED"
+    if interventions:
+        return "NEEDS OPERATOR"
+    if SWARM.live() > 0:
+        return "HUNTING"
+    return "IDLE"
 
 ALERTS: list = []
 _subscribers: list = []
@@ -69,16 +113,22 @@ async def _start_swarm():
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
+    interventions = INTERVENTIONS.open()
+    visitors = decoy_visitors()
+    hits = VAULT.hits(20)
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
+        "state": system_state(interventions, visitors, hits),
+        "containment": containment(),
         "swarm": SWARM.status(),
-        "interventions": INTERVENTIONS.open(),
+        "interventions": interventions,
+        "visitors": visitors,
         "canaries": VAULT.all(),
-        "canary_hits": VAULT.hits(20),
+        "canary_hits": hits,
         "canary_stats": VAULT.stats(),
         "verdicts": DB.recent(40),
         "db_stats": DB.stats(),
-        "alerts": ALERTS[:30],
+        "alerts": ALERTS[:40],
         "placements": PLACEMENTS,
         "kinds": KINDS,
     })
@@ -152,7 +202,13 @@ async def delete_canary(token_id: str):
 
 @app.get("/api/status")
 async def api_status():
-    return {"swarm": SWARM.status(), "interventions": INTERVENTIONS.open(),
+    interventions = INTERVENTIONS.open()
+    visitors = decoy_visitors()
+    hits = VAULT.hits(20)
+    return {"state": system_state(interventions, visitors, hits),
+            "containment": containment(),
+            "swarm": SWARM.status(), "interventions": interventions,
+            "visitors": visitors, "canary_hits": hits,
             "canaries": VAULT.stats(), "verdicts": DB.stats(),
             "queued": len(QUEUE)}
 
@@ -181,7 +237,18 @@ async def events():
                     item = await asyncio.wait_for(queue.get(), timeout=5.0)
                     yield f"data: {json.dumps(item, default=str)}\n\n"
                 except asyncio.TimeoutError:
-                    payload = {"kind": "status", **SWARM.status()}
+                    interventions = INTERVENTIONS.open()
+                    visitors = decoy_visitors()
+                    hits = VAULT.hits(20)
+                    payload = {
+                        "kind": "status",
+                        "state": system_state(interventions, visitors, hits),
+                        "interventions": len(interventions),
+                        "humans": len(visitors.get("humans", [])),
+                        "visitors": visitors.get("visitors", []),
+                        "hits": len(hits),
+                        **SWARM.status(),
+                    }
                     yield f"data: {json.dumps(payload, default=str)}\n\n"
         finally:
             if queue in _subscribers:
