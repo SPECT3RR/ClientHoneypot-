@@ -13,6 +13,7 @@ config/profiles/
 # Runtime-generated artifacts (recreated per session)
 telemetry/session.db
 reports/*.json
+reports/*.jsonl
 reports/*.html
 screenshots/*/
 config/persona_snapshots/*.json
