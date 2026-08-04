@@ -48,7 +48,7 @@ ALLOWLISTED_DOMAINS = {
 
 def _domain_allowlisted(url: str) -> bool:
     try:
-        host = urlparse(url).netloc.lower().lstrip("www.")
+        host = urlparse(url).netloc.lower().removeprefix("www.")
         return any(host == d or host.endswith("." + d) for d in ALLOWLISTED_DOMAINS)
     except Exception:
         return False
