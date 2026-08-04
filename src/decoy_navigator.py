@@ -6,10 +6,13 @@ Extracts the hardcoded decoy-walk logic from orchestrator.py into a
 reusable, randomized, testable module.  Each run explores a different
 subset of the decoy portal so demonstrations look organic, not scripted.
 """
+import os
 import random
 import asyncio
 
-DECOY_BASE = "http://127.0.0.1:8001"
+# Inside a hunting container the decoy is not on loopback — it stays on the
+# host and is reached through the Docker gateway.
+DECOY_BASE = os.environ.get("CH_DECOY_BASE", "http://127.0.0.1:8001")
 
 # Pool of decoy pages the browser can visit.  Each entry has a path
 # and optional CSS selectors for interactive elements on that page.
@@ -165,11 +168,16 @@ async def explore_decoy(browser, session_id: str, telemetry=None,
     return summary
 
 
-def check_decoy_reachable(host: str = "127.0.0.1", port: int = 8001) -> bool:
+def check_decoy_reachable(host: str = None, port: int = None) -> bool:
     """Check if the decoy app is running before attempting navigation."""
     import socket
+    from urllib.parse import urlparse
+    if host is None or port is None:
+        parsed = urlparse(DECOY_BASE)
+        host = host or parsed.hostname or "127.0.0.1"
+        port = port or parsed.port or 8001
     try:
-        s = socket.create_connection((host, port), timeout=2)
+        s = socket.create_connection((host, port), timeout=3)
         s.close()
         return True
     except OSError:

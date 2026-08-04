@@ -107,3 +107,38 @@ def test_describe_is_machine_readable():
     d = sub.DockerSubstrate().describe()
     assert d == {"profile": "docker", "isolated": True,
                  "allows_live_targets": True}
+
+
+# ── the docker profile must actually relocate execution ────────────────────
+
+def test_isolated_profile_exposes_a_session_runner():
+    """A profile that permits live hunting but still runs the browser on the
+    host would be a lie. The runner is what makes it true."""
+    s = sub.DockerSubstrate()
+    assert callable(getattr(s, "run_session", None))
+
+
+def test_run_session_refuses_a_target_the_profile_disallows():
+    s = sub.DockerSubstrate()
+    with pytest.raises(sub.UnsafeTargetError):
+        s.run_session("http://192.168.1.50/", "sess1")
+
+
+def test_container_run_inherits_isolation_from_the_environment(monkeypatch):
+    """Inside the container the shipped config still says 'local'. Without
+    the env override the session would refuse its own target."""
+    monkeypatch.setenv("CH_SUBSTRATE", "docker")
+    s = sub.load()
+    assert isinstance(s, sub.DockerSubstrate)
+    assert s.allows_live_targets is True
+
+
+def test_env_override_does_not_leak_when_unset(monkeypatch):
+    monkeypatch.delenv("CH_SUBSTRATE", raising=False)
+    assert sub.load().allows_live_targets is False
+
+
+def test_decoy_base_is_reachable_from_inside_a_container():
+    # Loopback inside the container is the container, not the host.
+    s = sub.DockerSubstrate()
+    assert "host.docker.internal" in s.decoy_base

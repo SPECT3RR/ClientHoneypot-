@@ -26,8 +26,8 @@ Containment is layered, not absolute. WSL2 is a real VM boundary but it is
 not a hardened microVM, and this is stated plainly rather than implied.
 """
 import ipaddress
+import os
 import shutil
-import socket
 import subprocess
 from pathlib import Path
 from urllib.parse import urlparse
@@ -144,6 +144,8 @@ class DockerSubstrate(Substrate):
         super().__init__(config)
         self.image = self.config.get("image", "clienthoneypot/hunter:latest")
         self.network = self.config.get("network", "hunt_net")
+        self.decoy_base = self.config.get(
+            "decoy_base", "http://host.docker.internal:8001")
 
     def available(self) -> tuple:
         if shutil.which("docker") is None:
@@ -162,9 +164,65 @@ class DockerSubstrate(Substrate):
         ok, reason = self.available()
         if not ok:
             raise RuntimeError(f"cannot prepare isolated session: {reason}")
-        subprocess.run(["docker", "network", "inspect", self.network],
-                       capture_output=True, timeout=15)
+        self.ensure_network()
         return {"network": self.network, "image": self.image}
+
+    def ensure_network(self) -> None:
+        """Create the hunt network if it is missing.
+
+        Inter-container communication is disabled: two hunted sessions must
+        not be able to reach each other, so a payload that compromises one
+        worker cannot pivot into its neighbours.
+        """
+        probe = subprocess.run(["docker", "network", "inspect", self.network],
+                               capture_output=True, timeout=20)
+        if probe.returncode == 0:
+            return
+        subprocess.run(
+            ["docker", "network", "create", "--driver", "bridge",
+             "--opt", "com.docker.network.bridge.enable_icc=false",
+             self.network],
+            capture_output=True, timeout=30)
+
+    def run_session(self, url: str, session_id: str, timeout: int = 600) -> dict:
+        """Run one hunting session inside a throwaway container.
+
+        This is what makes the profile real rather than advisory: the browser
+        that renders attacker-controlled content executes in the WSL2 VM, not
+        on the Windows host. Results come back through the mounted telemetry
+        volume, so the control plane never has to reach into the container.
+        """
+        self.assert_target_allowed(url)
+        self.prepare(session_id)
+
+        root = Path(__file__).parent.parent
+        name = f"hunt_{session_id}"
+        cmd = [
+            "docker", "run", "--rm", "--name", name,
+            "--network", self.network,
+            "--security-opt", "no-new-privileges:true",
+            "--cap-drop", "ALL",
+            "--shm-size", "1g",              # Chromium dies on the 64 MB default
+            "--memory", "2g", "--pids-limit", "512",
+            "-v", f"{root / 'telemetry'}:/app/telemetry",
+            "-v", f"{root / 'reports'}:/app/reports",
+            "-e", "CH_SUBSTRATE=docker",     # the in-container run is already isolated
+            # The decoy stays on the host so it keeps its own network posture;
+            # the hunter reaches it through the Docker Desktop gateway rather
+            # than by joining the decoy's internal network.
+            "--add-host", "host.docker.internal:host-gateway",
+            "-e", f"CH_DECOY_BASE={self.decoy_base}",
+            self.image, url,
+        ]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True,
+                                  timeout=timeout)
+            return {"ok": proc.returncode == 0, "code": proc.returncode,
+                    "stdout": proc.stdout[-4000:], "stderr": proc.stderr[-2000:]}
+        except subprocess.TimeoutExpired:
+            self.teardown(session_id)
+            return {"ok": False, "code": -1, "stdout": "",
+                    "stderr": f"session exceeded {timeout}s and was destroyed"}
 
     def teardown(self, session_id: str) -> None:
         subprocess.run(["docker", "rm", "-f", f"hunt_{session_id}"],
@@ -180,6 +238,12 @@ def load(config_path: Path = None) -> Substrate:
     Defaults to 'local' — the safe-by-default direction. A missing or broken
     config must never silently grant live-hunting permission.
     """
+    # A session already running inside the container is isolated by
+    # definition; without this it would read the shipped 'local' config and
+    # refuse its own target.
+    if os.environ.get("CH_SUBSTRATE") == "docker":
+        return DockerSubstrate()
+
     path = Path(config_path or CONFIG)
     data = {}
     if path.exists():

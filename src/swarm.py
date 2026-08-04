@@ -181,6 +181,14 @@ class SwarmManager:
         state.persona = random.choice(list(PERSONA_LIBRARY))
         state.started = stamp
 
+        # Under an isolated substrate the whole session runs inside a
+        # throwaway container: the browser rendering attacker-controlled
+        # content must not execute on this host. Results come back through
+        # the shared verdict database, so the control plane never reaches in.
+        if getattr(self.substrate, "isolated", False):
+            await self._containerised_session(state, entry)
+            return
+
         bus = EventBus()
         bus.start()
         browser = None
@@ -296,6 +304,39 @@ class SwarmManager:
             self.completed += 1
             print(f"[worker {state.worker_id}] {entry.url} -> "
                   f"{state.verdict} (score {state.score})")
+
+    async def _containerised_session(self, state: WorkerState, entry) -> None:
+        """Delegate one session to a disposable container in the WSL2 VM.
+
+        Per-worker telemetry is coarser than the in-process path — the bus
+        lives inside the container — so status comes from the process and the
+        verdict is read back from the shared database afterwards. That is the
+        honest trade for not rendering hostile content on this host.
+        """
+        state.status = "hunting (isolated)"
+        loop = asyncio.get_running_loop()
+        try:
+            result = await loop.run_in_executor(
+                None, self.substrate.run_session, entry.url, state.session_id)
+            state.status = "done" if result["ok"] else "error"
+            if not result["ok"] and result["stderr"]:
+                print(f"[worker {state.worker_id}] container error: "
+                      f"{result['stderr'][:400]}")
+        except Exception:
+            state.status = "error"
+            traceback.print_exc()
+        finally:
+            row = None
+            try:
+                row = self.db.lookup(entry.url)
+            except Exception:
+                pass
+            if row:
+                state.verdict = row["verdict"]
+                state.score = row["score"]
+            self.completed += 1
+            print(f"[worker {state.worker_id}] {entry.url} -> "
+                  f"{state.verdict} (score {state.score}) [containerised]")
 
     async def _check_blocked(self, browser) -> tuple:
         try:
