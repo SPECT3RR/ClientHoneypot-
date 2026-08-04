@@ -126,6 +126,11 @@ class EventBus:
                     self._queue.task_done()
             except asyncio.CancelledError:
                 break
+            except RuntimeError as e:
+                # Loop closed or queue bound elsewhere: unrecoverable, and
+                # retrying spins the CPU while spamming the console forever.
+                print(f"[EventBus] Worker stopping, loop unusable: {e}")
+                break
             except Exception as e:
                 print(f"[EventBus] Worker error: {e}")
                 traceback.print_exc()

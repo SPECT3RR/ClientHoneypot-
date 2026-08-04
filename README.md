@@ -22,15 +22,15 @@ listed below runs end-to-end on your machine with Python + Playwright:
 | Human Behaviour Engine          | ✅ implemented | Randomized mouse movement, scroll, dwell time, click jitter |
 | Browser Controller              | ✅ implemented | Playwright/Chromium, screenshots, console + network capture |
 | Navigation Replay Engine        | ⚠️ partial | Supports a scripted referrer chain; no live ad-network replay |
-| Browser Monitoring Engine       | ✅ implemented | Requests/responses, console, downloads, dialogs, DOM snapshot |
-| Threat Detection Layer          | ⚠️ heuristic only | Regex/pattern based (obfuscated JS, exe/script downloads, redirect spam, known exploit-kit strings) — **not** a real exploit/heap-spray detector |
-| Decision Engine                 | ✅ implemented | Threshold-based switch to decoy mode |
+| Browser Monitoring Engine       | ✅ implemented | Playwright hooks (requests/responses, console, downloads, dialogs, DOM snapshot) plus runtime DOM/JS instrumentation: dynamic script/iframe injection, popup spam, storage exfil, clipboard, service workers, credential form submits |
+| Threat Detection Layer          | ⚠️ heuristic only | Correlated multi-signal scoring: 60+ raw signals grouped into 8 attack clusters, where a cluster must fire rather than a single pattern — **not** a real exploit/heap-spray detector |
+| Decision Engine                 | ✅ implemented | Risk bands loaded from `config/decision_policy.yaml`; a CRITICAL payload detection overrides the bands and diverts immediately |
 | Enterprise Deception Environment| ✅ implemented | Local FastAPI app: login, HR portal, finance portal, file server, wiki — entirely synthetic |
 | Honey Assets / Honeytokens      | ✅ implemented | Fake AWS/SSH/DB creds, fake invoices/HR docs, each with a unique token ID |
 | Honeytoken access logging       | ✅ implemented | Any GET/read of a honeytoken file logs an alert with timestamp + session ID |
 | Telemetry Engine                | ✅ implemented | SQLite (`telemetry/session.db`) + per-session JSON |
 | Session Recorder                | ✅ implemented | Produces `reports/<session_id>.json` and a simple HTML summary |
-| Automated Cleanup               | ⚠️ partial | Closes browser context, wipes temp profile dir; **does not** manage VMs/containers — see below |
+| Automated Cleanup               | ⚠️ partial | Per-session profile directory, wiped on session end; **does not** manage VMs/containers — see below |
 | Dashboard                       | ⚠️ minimal | Static HTML report per session, not a live multi-session dashboard |
 | MITRE ATT&CK mapping            | ⚠️ stub | Threat detector tags findings with a best-guess ATT&CK technique ID from a small lookup table, not a real mapping engine |
 | Elastic/TimescaleDB              | ❌ not implemented | SQLite only |
@@ -56,15 +56,23 @@ what to build or bring in next (see "Roadmap").
 ## Quick start
 
 ```bash
-cd thug-deception-platform
 pip install -r requirements.txt
 playwright install chromium
 
 # Terminal 1: start the decoy enterprise environment
 python decoy_app/app.py
 
-# Terminal 2: run a session against one or more URLs
-python src/orchestrator.py --urls https://example.com --persona finance_qatar
+# Terminal 2: run a session
+python src/v2_orchestrator.py http://127.0.0.1:8080 --headed
+```
+
+> `src/orchestrator.py` (v1) does not run — its `BrowserSession` call predates the
+> v2 signature change. Use `src/v2_orchestrator.py`. v1 is removed in a later phase.
+
+Run the test suite, including the end-to-end detection → decoy loop:
+
+```bash
+python -m pytest tests/ -v
 ```
 
 Output:

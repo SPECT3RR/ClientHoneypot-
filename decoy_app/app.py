@@ -30,6 +30,23 @@ app = FastAPI(title="Asteria Holdings Decoy Portal")
 _FILES = generate_honeytokens()
 
 
+@app.middleware("http")
+async def _bind_session_cookie(request: Request, call_next):
+    """Pin the session id to a cookie the first time it arrives as ?sid=.
+
+    Without this, attribution only survives while every URL is constructed by
+    us. The moment the visitor *clicks* a link — which is what a real attacker
+    does — the query param is gone and the honeytoken read is logged against
+    "unknown_session", orphaning the single most important piece of evidence
+    the decoy produces.
+    """
+    sid = request.query_params.get("sid")
+    response = await call_next(request)
+    if sid:
+        response.set_cookie("sid", sid, httponly=True, samesite="lax")
+    return response
+
+
 def _log_access(request: Request, event_type: str, data: dict):
     session_id = request.query_params.get("sid") or request.cookies.get("sid") or "unknown_session"
     t = Telemetry(session_id)
