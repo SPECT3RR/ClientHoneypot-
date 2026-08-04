@@ -12,6 +12,7 @@ from playwright_stealth import Stealth
 
 from persona import fingerprint_init_script
 from instrumentation import INSTRUMENTATION_JS
+from bait_seeder import BaitSeeder
 from cleanup import wipe_temp_profile
 from event_bus import EventBus, Event, EventCategory
 
@@ -20,13 +21,15 @@ SCREENSHOT_DIR = Path(__file__).parent.parent / "screenshots"
 from ownership_manager import OwnershipManager
 
 class BrowserSession:
-    def __init__(self, bus: EventBus, persona: dict, session_id: str, ownership_mgr: OwnershipManager, headless: bool = True):
+    def __init__(self, bus: EventBus, persona: dict, session_id: str, ownership_mgr: OwnershipManager, headless: bool = True, vault=None):
         self.bus = bus
         self.persona = persona
         self.session_id = session_id
         self.headless = headless
         self.ownership = ownership_mgr
         self.ownership._browser = self
+        self.vault = vault
+        self.bait = None
         
         self.last_response_status = 200
         self._pw = None
@@ -48,6 +51,15 @@ class BrowserSession:
         
         user_data_dir = self.profile_dir
         user_data_dir.mkdir(parents=True, exist_ok=True)
+
+        # Arm the profile BEFORE Chromium opens it. An infostealer harvests
+        # credentials the moment it lands; there is no second chance to plant
+        # bait after the payload has already run.
+        seeder = BaitSeeder(user_data_dir, self.session_id, self.persona,
+                            vault=self.vault)
+        self.bait = seeder.seed()
+        self._bait_script = seeder.init_script(seeder.tokens)
+        self._bait_cookies = seeder.cookies(seeder.tokens)
         
         self._context = await self._pw.chromium.launch_persistent_context(
             user_data_dir=str(user_data_dir),
@@ -61,6 +73,11 @@ class BrowserSession:
         )
         await self._context.add_init_script(fingerprint_init_script(self.persona))
         await self._context.add_init_script(INSTRUMENTATION_JS)
+        await self._context.add_init_script(self._bait_script)
+        try:
+            await self._context.add_cookies(self._bait_cookies)
+        except Exception:
+            pass  # cookie seeding is best-effort; never block a session on it
         await self._context.add_init_script("""
             window.__weave = {
                 owner: "BOT_ACTIVE"

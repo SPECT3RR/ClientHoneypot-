@@ -13,6 +13,7 @@ from page_classifier import PageClassifier
 from behavioral_detector import BehavioralChallengeDetector
 from compromise_detector import CompromiseDetector
 from verdict_db import VerdictDB
+from canary_vault import CanaryVault, default_seed_tokens
 from decision_policy import DecisionPolicyEngine
 from ownership_manager import OwnershipManager
 from interaction_scheduler import InteractionScheduler
@@ -70,6 +71,12 @@ async def run_v2_session(target_url: str, headless: bool = True):
 
     verdict_db = VerdictDB(session_id=session_id)
     verdict_db.initialize(session_bus)
+
+    vault = CanaryVault(verdict_db)
+    minted = default_seed_tokens(vault)
+    if minted:
+        print(f"[+] Canaries  : minted {len(minted)} self-hosted bait tokens "
+              f"(vault was empty)")
     
     # 4. Initialize Control & Interaction Engines
     decision_policy = DecisionPolicyEngine(session_bus)
@@ -77,7 +84,7 @@ async def run_v2_session(target_url: str, headless: bool = True):
     interaction_scheduler = InteractionScheduler(session_bus, ownership_mgr, user_context)
     
     # 5. Initialize Playwright Browser
-    browser = BrowserSession(bus=session_bus, persona=persona, session_id=session_id, ownership_mgr=ownership_mgr, headless=headless)
+    browser = BrowserSession(bus=session_bus, persona=persona, session_id=session_id, ownership_mgr=ownership_mgr, headless=headless, vault=vault)
 
     # 6. Initialize Subsystems — needs the browser it will drive into the decoy
     decoy_controller = DecoyController(session_bus,

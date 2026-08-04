@@ -54,6 +54,37 @@ def _log_access(request: Request, event_type: str, data: dict):
     t.close()
 
 
+@app.get("/c/{token_id}")
+async def canary_callback(request: Request, token_id: str):
+    """Self-hosted canary endpoint.
+
+    A GET here means bait we planted has been used. It usually arrives long
+    after the session ended and from attacker infrastructure rather than the
+    site we visited — which is exactly why the token carries its origin
+    session. Responds innocuously so the caller learns nothing.
+    """
+    from canary_vault import CanaryVault  # noqa: E402
+    from verdict_db import VerdictDB      # noqa: E402
+
+    db = VerdictDB()
+    hit = CanaryVault(db).record_hit(
+        token_id,
+        src_ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        detail={"path": str(request.url.path),
+                "referer": request.headers.get("referer")},
+    )
+    db.close()
+
+    if hit:
+        origin = hit.get("origin_session") or "unattributed"
+        print(f"[CANARY] {hit['kind']} '{hit['label']}' fired from "
+              f"{hit['src_ip']} -- planted in session {origin}")
+        _log_access(request, "canary_hit", hit)
+
+    return PlainTextResponse("", status_code=204)
+
+
 @app.get("/portal/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     _log_access(request, "decoy_page_view", {"page": "login"})
