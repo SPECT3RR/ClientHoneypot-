@@ -142,3 +142,48 @@ def test_decoy_base_is_reachable_from_inside_a_container():
     # Loopback inside the container is the container, not the host.
     s = sub.DockerSubstrate()
     assert "host.docker.internal" in s.decoy_base
+
+
+def test_container_run_command_carries_the_hardening(monkeypatch):
+    """Assert the flags that actually constrain a hostile session, so a
+    silent drop of one is caught here rather than after a breach."""
+    captured = {}
+
+    class FakeProc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(cmd, **kw):
+        if cmd[:2] == ["docker", "run"]:
+            captured["cmd"] = cmd
+        return FakeProc()
+
+    monkeypatch.setattr(sub.subprocess, "run", fake_run)
+    s = sub.DockerSubstrate()
+    s.run_session("https://evil.example/x", "sess42")
+
+    cmd = " ".join(captured["cmd"])
+    assert "--rm" in cmd                              # disposable
+    assert "no-new-privileges:true" in cmd            # no privilege gain
+    assert "--cap-drop ALL" in cmd
+    assert "--network hunt_net" in cmd                # not the host network
+    assert "--shm-size 1g" in cmd                     # Chromium OOMs on 64 MB
+    assert "--pids-limit" in cmd and "--memory" in cmd
+    assert "CH_SUBSTRATE=docker" in cmd
+    assert "host.docker.internal:host-gateway" in cmd
+    assert cmd.rstrip().endswith("https://evil.example/x")
+
+
+def test_container_timeout_destroys_the_session(monkeypatch):
+    def fake_run(cmd, **kw):
+        if cmd[:2] == ["docker", "run"]:
+            raise sub.subprocess.TimeoutExpired(cmd, 600)
+        class P: returncode = 0; stdout = ""; stderr = ""
+        return P()
+
+    monkeypatch.setattr(sub.subprocess, "run", fake_run)
+    result = sub.DockerSubstrate().run_session("https://evil.example/", "s1")
+    # A hung hostile session must not linger; it is killed and reported.
+    assert result["ok"] is False
+    assert "destroyed" in result["stderr"]
