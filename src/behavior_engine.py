@@ -80,33 +80,11 @@ async def random_click(page):
 async def act_human(page):
     """Composite behavior pass used after each navigation."""
     try:
-        await page.evaluate("""
-            if (!window.__virtualCursor) {
-                const cursor = document.createElement('div');
-                cursor.style.width = '20px';
-                cursor.style.height = '20px';
-                cursor.style.background = 'rgba(255, 0, 0, 0.8)';
-                cursor.style.position = 'absolute';
-                cursor.style.pointerEvents = 'none';
-                cursor.style.zIndex = '2147483647'; // Max z-index
-                cursor.style.borderRadius = '50%';
-                cursor.style.border = '2px solid white';
-                cursor.style.transition = 'top 0.05s linear, left 0.05s linear';
-                document.body.appendChild(cursor);
-                window.__virtualCursor = cursor;
-                
-                document.addEventListener('mousemove', e => {
-                    window.__virtualCursor.style.left = e.pageX + 'px';
-                    window.__virtualCursor.style.top = e.pageY + 'px';
-                });
-            }
-        """)
+        await random_mouse_wander(page)
+        await random_scroll(page)
+        if random.random() < 0.8:
+            await random_click(page)
+        await simulate_reading(page)
+        await occasional_idle()
     except Exception:
         pass
-
-    await random_mouse_wander(page)
-    await random_scroll(page)
-    if random.random() < 0.8:
-        await random_click(page)
-    await simulate_reading(page)
-    await occasional_idle()
