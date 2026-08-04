@@ -91,7 +91,17 @@ async def run_v2_session(target_url: str, headless: bool = True):
             while not browser._page.is_closed():
                 await interaction_scheduler.tick(browser._page)
                 if ownership_mgr.current_owner.name == "DECOY":
-                    print("[!] DECOY State detected! Breaking weave loop.")
+                    print("[!] DECOY state detected. Waiting for the decoy walk "
+                          "to finish before teardown...")
+                    # engage() runs from a bus subscriber, concurrently with
+                    # this loop. Tearing the browser down now would kill the
+                    # walk mid-step and lose the honeytoken evidence.
+                    try:
+                        await asyncio.wait_for(
+                            decoy_controller.finished.wait(), timeout=180)
+                        print("[+] Decoy walk complete.")
+                    except asyncio.TimeoutError:
+                        print("[!] Decoy walk timed out after 180s.")
                     break
         except (Exception, KeyboardInterrupt, asyncio.CancelledError) as e:
             print(f"\n[!] Session interrupted by user (or error): {type(e).__name__}")
@@ -114,6 +124,15 @@ async def run_v2_session(target_url: str, headless: bool = True):
         await session_bus.stop()
 
 if __name__ == "__main__":
+    # The Windows console defaults to cp1252, which cannot encode the box
+    # drawing and arrow characters used in status output. Without this, the
+    # first state transition kills the run with UnicodeEncodeError.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError):
+            pass
+
     parser = argparse.ArgumentParser(description="Run the v2 Adaptive Weave Engine")
     parser.add_argument("url", nargs="?", default="https://example.com", help="Target URL")
     parser.add_argument("--headed", action="store_true", help="Run with visible browser window")

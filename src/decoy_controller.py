@@ -7,6 +7,8 @@ browser to decoy_navigator.explore_decoy, which performs a randomised walk
 (login, form fill, 2-4 portal pages, file server, honeytoken) so successive
 sessions do not look scripted.
 """
+import asyncio
+
 from event_bus import EventBus, Event, EventCategory
 from decoy_navigator import explore_decoy, check_decoy_reachable
 
@@ -17,6 +19,11 @@ class DecoyController:
         self.ownership = ownership_mgr
         self.browser = browser
         self.engaged = False
+        # Set once the walk is over, however it ended. The orchestrator waits
+        # on this before teardown: engage() runs from a bus subscriber, so
+        # without it the weave loop sees DECOY, breaks, and closes the browser
+        # out from under the walk still using it.
+        self.finished = asyncio.Event()
         bus.subscribe(EventCategory.SYSTEM, self._on_system_event)
 
     async def _on_system_event(self, event: Event) -> None:
@@ -27,12 +34,18 @@ class DecoyController:
     async def engage(self, browser=None) -> bool:
         if self.engaged:
             return False
+        try:
+            return await self._engage(browser)
+        finally:
+            self.finished.set()
+
+    async def _engage(self, browser=None) -> bool:
         browser = browser or self.browser
         if browser is None:
             return False
 
         if not check_decoy_reachable():
-            print("[DecoyController] decoy unreachable on 127.0.0.1:8001 — "
+            print("[DecoyController] decoy unreachable on 127.0.0.1:8001 - "
                   "start it with: python decoy_app/app.py")
             await self.bus.publish(Event(
                 priority=5, category=EventCategory.SYSTEM,

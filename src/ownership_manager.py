@@ -36,7 +36,7 @@ class OwnershipManager:
 
     def _set_state(self, new_state: OwnerState):
         if self._state != new_state:
-            print(f"[WEAVE] {self._state.name} \u2192 {new_state.name}")
+            print(f"[WEAVE] {self._state.name} -> {new_state.name}")
             self._state = new_state
             
             if hasattr(self, "_browser") and self._browser:
