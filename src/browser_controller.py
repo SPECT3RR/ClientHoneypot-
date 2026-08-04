@@ -12,6 +12,7 @@ from playwright_stealth import Stealth
 
 from persona import fingerprint_init_script
 from instrumentation import INSTRUMENTATION_JS
+from cleanup import wipe_temp_profile
 from event_bus import EventBus, Event, EventCategory
 
 SCREENSHOT_DIR = Path(__file__).parent.parent / "screenshots"
@@ -35,12 +36,17 @@ class BrowserSession:
         self._shot_dir.mkdir(parents=True, exist_ok=True)
         self._shot_index = 0
 
+        # One profile per session: cookies, service workers, and CacheStorage
+        # fetched from a malicious site must never reach the next session.
+        self.profile_dir = (Path(__file__).parent.parent / "config"
+                            / "profiles" / session_id)
+
     # ── lifecycle ──────────────────────────────────────────────────────────────
 
     async def start(self):
         self._pw = await async_playwright().start()
         
-        user_data_dir = Path(__file__).parent.parent / "config" / "profiles" / self.persona.get("persona_id", "default")
+        user_data_dir = self.profile_dir
         user_data_dir.mkdir(parents=True, exist_ok=True)
         
         self._context = await self._pw.chromium.launch_persistent_context(
@@ -371,6 +377,7 @@ class BrowserSession:
                 await self._context.close()
             if self._pw:
                 await self._pw.stop()
+            wipe_temp_profile(self.profile_dir)
         finally:
             await self.bus.publish(Event(
                 priority=10,
