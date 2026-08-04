@@ -222,6 +222,16 @@ class BrowserSession:
         page.on("download",       lambda dl: asyncio.create_task(self._on_download(dl)))
         page.on("dialog",         lambda d:  asyncio.create_task(self._on_dialog(d)))
         page.on("framenavigated", self._on_navigation)
+        page.on("websocket",      self._on_websocket)
+
+    def _on_websocket(self, ws):
+        asyncio.create_task(self.bus.publish(Event(
+            priority=10,
+            category=EventCategory.NETWORK,
+            type="websocket",
+            payload={"url": ws.url},
+            source="TelemetryCollector",
+        )))
 
     def _on_console(self, msg):
         asyncio.create_task(self.bus.publish(Event(

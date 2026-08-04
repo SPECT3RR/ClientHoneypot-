@@ -20,6 +20,7 @@ class ThreatScorer(AnalyticsPlugin):
         self._engine = td.ThreatScorer()
         self._redirect_chain = 0
         self._detected = False
+        self._muted = False
         self.bus = None
 
     def name(self) -> str:
@@ -41,16 +42,33 @@ class ThreatScorer(AnalyticsPlugin):
         bus.subscribe(EventCategory.NETWORK, self._on_network)
         bus.subscribe(EventCategory.DOM, self._on_dom)
         bus.subscribe(EventCategory.NAVIGATION, self._on_navigation)
+        bus.subscribe(EventCategory.SYSTEM, self._on_system)
+
+    async def _on_system(self, event: Event) -> None:
+        """Stop scoring once diverted.
+
+        Past DECOY the browser is walking our own synthetic portal, which has
+        login forms and password fields of its own. Scoring those attributes
+        our decoy's behaviour to the attacker and inflates the verdict for the
+        real target.
+        """
+        if event.type == "state_transition" and \
+                event.payload.get("new_state") == "DECOY":
+            self._muted = True
 
     # ── routing ────────────────────────────────────────────────────────────
 
     async def _on_navigation(self, event: Event) -> None:
+        if self._muted:
+            return
         if event.type == "visit_start":
             self._redirect_chain = 0
             url = event.payload.get("url", "")
             await self._record(td.scan_url(url), url)
 
     async def _on_network(self, event: Event) -> None:
+        if self._muted:
+            return
         if event.type == "redirect":
             self._redirect_chain += 1
             await self._record(td.scan_redirect_chain(self._redirect_chain),
@@ -60,6 +78,8 @@ class ThreatScorer(AnalyticsPlugin):
             await self._record(td.scan_download(filename), filename)
 
     async def _on_dom(self, event: Event) -> None:
+        if self._muted:
+            return
         url = event.payload.get("url", "")
         if event.type == "dom_snapshot":
             await self._record(td.scan_dom(event.payload.get("html", ""), url), url)

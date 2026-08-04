@@ -11,6 +11,8 @@ from user_context import UserContextModel
 from threat_scorer import ThreatScorer
 from page_classifier import PageClassifier
 from behavioral_detector import BehavioralChallengeDetector
+from compromise_detector import CompromiseDetector
+from verdict_db import VerdictDB
 from decision_policy import DecisionPolicyEngine
 from ownership_manager import OwnershipManager
 from interaction_scheduler import InteractionScheduler
@@ -62,6 +64,12 @@ async def run_v2_session(target_url: str, headless: bool = True):
     
     behavioral_detector = BehavioralChallengeDetector()
     behavioral_detector.initialize(session_bus)
+
+    compromise_detector = CompromiseDetector()
+    compromise_detector.initialize(session_bus)
+
+    verdict_db = VerdictDB(session_id=session_id)
+    verdict_db.initialize(session_bus)
     
     # 4. Initialize Control & Interaction Engines
     decision_policy = DecisionPolicyEngine(session_bus)
@@ -112,14 +120,30 @@ async def run_v2_session(target_url: str, headless: bool = True):
                 await browser.stop()
             except Exception:
                 pass # Ignore Playwright connection drop on forced interrupt
-                
+
+            verdict = verdict_db.record_verdict(
+                url=target_url,
+                score=threat_scorer.score,
+                clusters=threat_scorer.clusters,
+                findings=[f["label"] for f in threat_scorer.summary()["findings"]],
+                decision=decision_policy.current_state,
+            )
+            actions = compromise_detector.summary()
+            print(f"[+] Verdict   : {verdict.upper()} (score {threat_scorer.score})")
+            print(f"[+] Clusters  : {threat_scorer.clusters or 'none'}")
+            print(f"[+] Compromise: {actions['count']} action(s) {actions['kinds']}")
+            verdict_db.close()
+
             timeline_recorder.export()
             await session_bus.stop()
             print("[+] Live session complete.")
-            
+
     else:
         print("[-] Navigation failed.")
         await browser.stop()
+        verdict_db.record_verdict(target_url, threat_scorer.score,
+                                  threat_scorer.clusters, [], "navigation_failed")
+        verdict_db.close()
         timeline_recorder.export()
         await session_bus.stop()
 
