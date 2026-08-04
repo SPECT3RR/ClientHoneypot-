@@ -26,6 +26,7 @@ from browser_controller import BrowserSession
 from session_timeline import SessionTimelineRecorder
 from interventions import detect_block
 from link_crawler import LinkCrawler
+from nav_replay import build_journey
 import substrate as substrate_mod
 
 
@@ -213,7 +214,23 @@ class SwarmManager:
 
             await browser.start()
             state.status = "hunting"
-            ok = await browser.visit(entry.url)
+
+            # Never arrive cold. A visit with no referrer, no cookies, and no
+            # prior history is itself a bot signal — walking a plausible
+            # journey first is cheaper than defeating a block afterwards.
+            # Only under an isolated substrate: the hops are real sites, and
+            # the local profile is loopback-only by design.
+            if self.substrate.allows_live_targets:
+                journey = build_journey(entry.url, state.persona,
+                                        custom_chain=entry.referrer_chain or None)
+                previous = None
+                for hop in journey.hops:
+                    if await browser.visit(hop, referrer=previous):
+                        previous = hop
+                    await asyncio.sleep(random.uniform(0.8, 2.5))
+                ok = await browser.visit(entry.url, referrer=previous)
+            else:
+                ok = await browser.visit(entry.url)
             await bus.drain()
 
             if ok:
