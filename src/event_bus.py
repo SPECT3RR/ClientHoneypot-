@@ -23,6 +23,17 @@ class EventCategory(Enum):
 _seq_counter = itertools.count()
 
 
+def _is_async_callable(cb) -> bool:
+    """True for coroutine functions, bound coroutine methods, and callable
+    objects whose __call__ is async. asyncio.iscoroutinefunction alone
+    returns False for the last case, which silently routes such a subscriber
+    into the executor and leaves its coroutine un-awaited.
+    """
+    if asyncio.iscoroutinefunction(cb):
+        return True
+    return asyncio.iscoroutinefunction(getattr(cb, "__call__", None))
+
+
 @dataclass(order=True)
 class Event:
     priority: int
@@ -125,7 +136,7 @@ class EventBus:
         loop = asyncio.get_running_loop()
         awaitables = []
         for cb in callbacks:
-            if asyncio.iscoroutinefunction(cb):
+            if _is_async_callable(cb):
                 awaitables.append(cb(event))
             else:
                 awaitables.append(loop.run_in_executor(None, cb, event))
