@@ -55,6 +55,7 @@ class EventBus:
             cat: set() for cat in EventCategory
         }
         self._all_subscribers: Set[Callable[[Event], Any]] = set()
+        self._maxsize = maxsize
         self._queue = asyncio.PriorityQueue(maxsize=maxsize)
         self._worker_task = None
         self.errors: List[tuple] = []
@@ -62,8 +63,15 @@ class EventBus:
 
     def start(self):
         """Start the background worker task to process events."""
-        if self._worker_task is None:
-            self._worker_task = asyncio.create_task(self._worker_loop())
+        if self._worker_task is not None:
+            return
+        if self._queue.empty():
+            # asyncio primitives bind to the first loop that awaits them. A bus
+            # constructed outside a running loop — or reused after stop() — would
+            # otherwise raise "bound to a different event loop" on first get().
+            # Rebinding here is safe only while nothing is queued.
+            self._queue = asyncio.PriorityQueue(maxsize=self._maxsize)
+        self._worker_task = asyncio.create_task(self._worker_loop())
 
     async def stop(self):
         """Stop the background worker."""

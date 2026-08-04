@@ -4,22 +4,28 @@ Launches real Chromium via Playwright, drives interaction,
 and acts as a pure Telemetry Collector, forwarding all observables to the Event Bus.
 """
 import asyncio
+import json
 from pathlib import Path
 
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
 
 from persona import fingerprint_init_script
+from instrumentation import INSTRUMENTATION_JS
 from event_bus import EventBus, Event, EventCategory
 
 SCREENSHOT_DIR = Path(__file__).parent.parent / "screenshots"
 
+from ownership_manager import OwnershipManager
+
 class BrowserSession:
-    def __init__(self, bus: EventBus, persona: dict, session_id: str, headless: bool = True):
+    def __init__(self, bus: EventBus, persona: dict, session_id: str, ownership_mgr: OwnershipManager, headless: bool = True):
         self.bus = bus
         self.persona = persona
         self.session_id = session_id
         self.headless = headless
+        self.ownership = ownership_mgr
+        self.ownership._browser = self
         
         self.last_response_status = 200
         self._pw = None
@@ -48,15 +54,97 @@ class BrowserSession:
             timezone_id=self.persona.get("timezone_id", "America/New_York"),
         )
         await self._context.add_init_script(fingerprint_init_script(self.persona))
+        await self._context.add_init_script(INSTRUMENTATION_JS)
         await self._context.add_init_script("""
-            window.__lastHumanMove = Date.now();
-            document.addEventListener('mousemove', e => {
-                if (e.isTrusted) { window.__lastHumanMove = Date.now(); }
-            }, {capture: true});
-            document.addEventListener('keydown', e => {
-                if (e.isTrusted) { window.__lastHumanMove = Date.now(); }
-            }, {capture: true});
+            window.__weave = {
+                owner: "BOT_ACTIVE"
+            };
+            
+            function handleInput(e) {
+                // If it's a Playwright-injected event during a bot action, ignore completely.
+                if (!e.isTrusted) return; 
+                
+                // If it's trusted, it's a candidate for human activity.
+                // We forward it to Python which will classify it against the Bot-Action Boundary.
+                if (window.notify_human_activity) {
+                    window.notify_human_activity(e.type);
+                }
+            }
+            
+            // Listen to all physical input events
+            ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart'].forEach(t => 
+                document.addEventListener(t, handleInput, {capture: true, passive: true})
+            );
+            
+            let lastActivity = performance.now();
+            let isIdle = false;
+            
+            // Override handleInput to also track local idle state
+            function handleInputWrapper(e) {
+                if (e.isTrusted) {
+                    lastActivity = performance.now();
+                    isIdle = false;
+                    handleInput(e);
+                }
+            }
+            ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart'].forEach(t => 
+                document.removeEventListener(t, handleInput, {capture: true, passive: true})
+            );
+            ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart'].forEach(t => 
+                document.addEventListener(t, handleInputWrapper, {capture: true, passive: true})
+            );
+
+            setInterval(() => {
+                if (!isIdle && (performance.now() - lastActivity > 5000)) {
+                    isIdle = true;
+                    if (window.notify_human_idle) {
+                        window.notify_human_idle();
+                    }
+                }
+            }, 500);
+            
+            // Persistent Red Dot Injector (survives navigations)
+            setInterval(() => {
+                if (!window.__virtualCursor && document.body) {
+                    const cursor = document.createElement('div');
+                    cursor.style.width = '20px';
+                    cursor.style.height = '20px';
+                    cursor.style.background = 'rgba(255, 0, 0, 0.8)';
+                    cursor.style.position = 'absolute';
+                    cursor.style.pointerEvents = 'none';
+                    cursor.style.zIndex = '2147483647';
+                    cursor.style.borderRadius = '50%';
+                    cursor.style.border = '2px solid white';
+                    cursor.style.transition = 'top 0.05s linear, left 0.05s linear';
+                    cursor.style.opacity = '0'; // Hide by default
+                    document.body.appendChild(cursor);
+                    window.__virtualCursor = cursor;
+                    
+                    document.addEventListener('mousemove', e => {
+                        // Move the dot when bot is moving the mouse
+                        if (!e.isTrusted) {
+                            window.__virtualCursor.style.left = e.pageX + 'px';
+                            window.__virtualCursor.style.top = e.pageY + 'px';
+                        }
+                    }, {capture: true});
+                }
+                
+                // The visibility is STRICTLY tied to the Authoritative Ownership State!
+                if (window.__virtualCursor) {
+                    if (window.__weave.owner === "BOT_ACTIVE") {
+                        window.__virtualCursor.style.opacity = '1';
+                    } else {
+                        window.__virtualCursor.style.opacity = '0';
+                    }
+                }
+            }, 100);
         """)
+        
+        # Bind Python callbacks so JS can push interrupts directly to Python
+        await self._context.expose_binding("notify_human_activity", lambda source, event_type: self.ownership.notify_human_activity(event_type))
+        await self._context.expose_binding("notify_human_idle", lambda source: self.ownership.notify_human_idle())
+        await self._context.expose_binding("__reportRuntimeEvent", self._on_runtime_event)
+
         
         if self._context.pages:
             self._page = self._context.pages[0]
@@ -76,6 +164,16 @@ class BrowserSession:
             source="BrowserController"
         ))
 
+    async def broadcast_owner_state(self, state_name: str):
+        """Pushes the authoritative ownership state to all active tabs to update the Red Dot."""
+        if not self._context: return
+        for p in self._context.pages:
+            if not p.is_closed():
+                try:
+                    await p.evaluate(f"window.__weave = window.__weave || {{}}; window.__weave.owner = '{state_name}';")
+                except Exception:
+                    pass
+
     # ── monitoring hooks (Telemetry Collectors) ────────────────────────────────
 
     def _on_new_page(self, page):
@@ -88,6 +186,28 @@ class BrowserSession:
             source="BrowserController"
         )))
         self._wire_monitoring(page)
+
+    def _on_runtime_event(self, source, payload_json: str) -> None:
+        """Binding target for instrumentation.js. Runs on the event loop
+        thread; publishing is scheduled rather than awaited so a slow bus
+        never stalls the page.
+        """
+        try:
+            data = json.loads(payload_json)
+        except (ValueError, TypeError):
+            return
+
+        detail = data.get("detail") or {}
+        if not isinstance(detail, dict):
+            detail = {"value": detail}
+
+        asyncio.create_task(self.bus.publish(Event(
+            priority=10,
+            category=EventCategory.DOM,
+            type=data.get("type", "runtime_event"),
+            payload={**detail, "url": data.get("url", "")},
+            source="RuntimeInstrumentation",
+        )))
 
     def _wire_monitoring(self, page):
         page.on("console",        self._on_console)
