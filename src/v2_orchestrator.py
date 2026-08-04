@@ -12,7 +12,7 @@ from threat_scorer import ThreatScorer
 from page_classifier import PageClassifier
 from behavioral_detector import BehavioralChallengeDetector
 from decision_policy import DecisionPolicyEngine
-from weave_controller import AdaptiveWeaveController
+from ownership_manager import OwnershipManager
 from interaction_scheduler import InteractionScheduler
 from decoy_controller import DecoyController
 from reliability_layer import ReliabilityLayer
@@ -20,7 +20,9 @@ from session_timeline import SessionTimelineRecorder
 from browser_controller import BrowserSession
 
 async def run_v2_session(target_url: str, headless: bool = True):
-    session_id = "v2_live_session"
+    import datetime
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    session_id = f"v2_live_session_{timestamp}"
     print(f"\n[+] Starting Live v2 Session for: {target_url} (Headless: {headless})")
     
     # 1. Initialize Event-Driven Backbone
@@ -63,15 +65,17 @@ async def run_v2_session(target_url: str, headless: bool = True):
     
     # 4. Initialize Control & Interaction Engines
     decision_policy = DecisionPolicyEngine(session_bus)
-    weave_controller = AdaptiveWeaveController(session_bus)
-    interaction_scheduler = InteractionScheduler(session_bus, weave_controller, user_context)
+    ownership_mgr = OwnershipManager()
+    interaction_scheduler = InteractionScheduler(session_bus, ownership_mgr, user_context)
     
-    # 5. Initialize Subsystems
-    decoy_controller = DecoyController(session_bus)
-    
-    # 6. Initialize Playwright Browser
-    browser = BrowserSession(bus=session_bus, persona=persona, session_id=session_id, headless=headless)
-    
+    # 5. Initialize Playwright Browser
+    browser = BrowserSession(bus=session_bus, persona=persona, session_id=session_id, ownership_mgr=ownership_mgr, headless=headless)
+
+    # 6. Initialize Subsystems — needs the browser it will drive into the decoy
+    decoy_controller = DecoyController(session_bus,
+                                       ownership_mgr=ownership_mgr,
+                                       browser=browser)
+
     print("[+] Components wired. Launching Playwright browser...")
     await browser.start()
     
@@ -86,7 +90,7 @@ async def run_v2_session(target_url: str, headless: bool = True):
             # Weave indefinitely until page closes
             while not browser._page.is_closed():
                 await interaction_scheduler.tick(browser._page)
-                if weave_controller.active_state == "DECOY":
+                if ownership_mgr.current_owner.name == "DECOY":
                     print("[!] DECOY State detected! Breaking weave loop.")
                     break
         except (Exception, KeyboardInterrupt, asyncio.CancelledError) as e:

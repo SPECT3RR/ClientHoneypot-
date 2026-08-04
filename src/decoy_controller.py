@@ -1,27 +1,57 @@
+"""
+Decoy Controller — drives the browser into the synthetic enterprise
+environment once the decision policy calls for it.
+
+Subscribes to state_transition. On DECOY it takes ownership, then hands the
+browser to decoy_navigator.explore_decoy, which performs a randomised walk
+(login, form fill, 2-4 portal pages, file server, honeytoken) so successive
+sessions do not look scripted.
+"""
 from event_bus import EventBus, Event, EventCategory
+from decoy_navigator import explore_decoy, check_decoy_reachable
+
 
 class DecoyController:
-    """
-    Manages the post-compromise decoy engagement subsystem.
-    """
-    def __init__(self, bus: EventBus):
+    def __init__(self, bus: EventBus, ownership_mgr=None, browser=None):
         self.bus = bus
+        self.ownership = ownership_mgr
+        self.browser = browser
         self.engaged = False
-        
-    async def engage(self, page) -> None:
+        bus.subscribe(EventCategory.SYSTEM, self._on_system_event)
+
+    async def _on_system_event(self, event: Event) -> None:
+        if event.type == "state_transition" and \
+                event.payload.get("new_state") == "DECOY":
+            await self.engage()
+
+    async def engage(self, browser=None) -> bool:
         if self.engaged:
-            return
-            
+            return False
+        browser = browser or self.browser
+        if browser is None:
+            return False
+
+        if not check_decoy_reachable():
+            print("[DecoyController] decoy unreachable on 127.0.0.1:8001 — "
+                  "start it with: python decoy_app/app.py")
+            await self.bus.publish(Event(
+                priority=5, category=EventCategory.SYSTEM,
+                type="decoy_engage_failed",
+                payload={"reason": "decoy app not reachable on 127.0.0.1:8001"},
+                source="DecoyController"))
+            return False
+
         self.engaged = True
-        print("[DecoyController] Engaging High-Interaction Decoy...")
-        
-        # Here we would seamlessly navigate the browser to the internal 127.0.0.1:8001
-        # enterprise portal, allowing the payload to execute against synthetic assets.
-        
+        if self.ownership is not None:
+            self.ownership.set_decoy()
+
+        session_id = getattr(browser, "session_id", "unknown_session")
+        print("[DecoyController] engaging decoy environment...")
+        summary = await explore_decoy(browser, session_id)
+
         await self.bus.publish(Event(
-            priority=5,
-            category=EventCategory.SYSTEM,
+            priority=5, category=EventCategory.SYSTEM,
             type="decoy_engaged",
-            payload={"status": "success"},
-            source="DecoyController"
-        ))
+            payload={"status": "success", **summary},
+            source="DecoyController"))
+        return True

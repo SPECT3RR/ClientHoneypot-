@@ -23,7 +23,7 @@ DECOY_PAGES = [
 ]
 
 
-async def explore_decoy(browser, session_id: str, telemetry,
+async def explore_decoy(browser, session_id: str, telemetry=None,
                         num_pages: int = None) -> dict:
     """
     Walk the browser through the decoy enterprise portal.
@@ -160,7 +160,8 @@ async def explore_decoy(browser, session_id: str, telemetry,
         "honeytokens_accessed": [s.split(":")[1] for s in steps if s.startswith("honeytoken:")],
     }
     
-    telemetry.log("decoy_exploration_complete", summary)
+    if telemetry is not None:
+        telemetry.log("decoy_exploration_complete", summary)
     return summary
 
 
