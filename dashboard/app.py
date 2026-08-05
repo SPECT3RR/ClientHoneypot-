@@ -181,6 +181,48 @@ INTERVENTIONS.subscribe(lambda i: alert(
     else f"Intervention #{i['id']} {i['status']}", i))
 
 
+def _pending_with_contacts(limit: int = 12) -> list:
+    """Each finding, plus the third parties that target contacted.
+
+    A per-page score cannot see that an innocent-looking publisher loads
+    infrastructure the feeds already know. This puts both on the same card.
+    """
+    out, seen = [], set()
+
+    for finding in TRIAGE.pending(limit):
+        finding["contacts"] = third_party.contacts_for(DB, finding["url"])
+        seen.add(finding["url"])
+        out.append(finding)
+
+    # A page can score clean on its own behaviour and still load
+    # infrastructure the feeds already know. That is the case a per-page score
+    # structurally cannot reach, and it is exactly what the enrichment exists
+    # to catch — so it belongs in the review queue too.
+    decided = {r["url"] for r in DB.conn.execute("SELECT url FROM triage")}
+    for row in DB.recent(limit=200):
+        url = row["url"]
+        if url in seen or url in decided:
+            continue
+        contacts = third_party.contacts_for(DB, url)
+        if not contacts["flagged"]:
+            continue
+        full = DB.lookup(url)
+        if not full:
+            continue
+        finding = explain(full)
+        finding["contacts"] = contacts
+        finding["surfaced_by"] = "third-party infrastructure"
+        finding["summary"] = (
+            f"Page behaviour scored {finding['score']}, below the threshold — "
+            f"but it contacted {len(contacts['flagged'])} host(s) that threat "
+            f"feeds flag. The publisher may be innocent; the infrastructure "
+            f"it loads is not.")
+        out.append(finding)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def _third_party_view(limit: int = 20) -> list:
     """Shortlist plus whatever the feeds have said about each host."""
     enricher = threatintel.Enricher(DB, INTEL_KEYS)
@@ -224,7 +266,7 @@ async def index(request: Request):
         "canary_stats": VAULT.stats(),
         "verdicts": DB.recent(40),
         "db_stats": DB.stats(),
-        "pending_review": TRIAGE.pending(12),
+        "pending_review": _pending_with_contacts(12),
         "triage_stats": TRIAGE.stats(),
         "intel_stats": third_party.stats(DB),
         "intel_active": threatintel.Enricher(DB, INTEL_KEYS).active(),
@@ -415,6 +457,12 @@ async def scan_hosts(limit: int = Form(20)):
                            f"the remaining providers carried the scan")
     alert("intel", f"checked {len(hosts)} host(s): {flagged} flagged")
     return RedirectResponse("/", status_code=303)
+
+
+@app.get("/api/contacts")
+async def api_contacts(url: str):
+    """Which third parties this target contacted, and what the feeds say."""
+    return third_party.contacts_for(DB, url)
 
 
 @app.get("/api/intel")

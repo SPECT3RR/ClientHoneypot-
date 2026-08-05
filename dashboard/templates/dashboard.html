@@ -447,6 +447,34 @@
         </details>
         {% endif %}
 
+        {% if f.contacts and f.contacts.total %}
+        <div style="margin:9px 0;padding:9px;border-radius:5px;
+                    background:rgba(255,45,85,.06);
+                    border:1px solid {% if f.contacts.flagged %}var(--hot){% else %}var(--line){% endif %}">
+          <div style="font-size:12px;margin-bottom:5px">
+            contacted <b>{{ f.contacts.total }}</b> third-party host(s) &mdash;
+            {% if f.contacts.flagged %}
+              <span class="malicious"><b>{{ f.contacts.flagged|length }} flagged by threat feeds</b></span>
+            {% else %}
+              <span class="muted">none flagged</span>
+            {% endif %}
+            {% if f.contacts.unchecked %}
+              <span class="muted">&middot; {{ f.contacts.unchecked|length }} not yet checked</span>
+            {% endif %}
+          </div>
+          {% for c in f.contacts.flagged %}
+            <div style="font-size:11px">
+              <span class="tag {{ c.verdict }}">{{ c.verdict }}</span>
+              <code>{{ c.host }}</code>
+              <span class="muted">seen as {{ c.roles|join(', ') }}
+                &middot; {{ c.flagged_by|join(', ') }}
+                {%- if c.detail.malicious is defined %} &middot; {{ c.detail.malicious }} engines{% endif %}
+                {%- if c.detail.threat_types %} &middot; {{ c.detail.threat_types|join(', ') }}{% endif %}</span>
+            </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+
         <form method="post" action="/triage/confirmed" class="inline" style="margin-top:10px">
           <input type="hidden" name="url" value="{{ f.url }}">
           <div style="flex:1"><input name="note" placeholder="note (optional)"

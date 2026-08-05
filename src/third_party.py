@@ -216,3 +216,105 @@ def stats(db) -> dict:
         "WHERE verdict IN ('malicious','suspicious')").fetchone()["c"]
     return {"hosts": total, "checked": checked, "unchecked": total - checked,
             "flagged": flagged}
+
+
+def harvest_session(db, session_id: str, reports_dir: Path = None) -> int:
+    """Inventory one session's timeline, straight after it finishes.
+
+    Same work as harvest_timelines but scoped, so a completed hunt enriches
+    its own contacts without re-reading every timeline on disk.
+    """
+    reports_dir = Path(reports_dir or REPORTS_DIR)
+    path = reports_dir / f"{session_id}_timeline.jsonl"
+    if not path.exists():
+        return 0
+
+    single = defaultdict(lambda: {"roles": set(), "count": 0, "sessions": set(),
+                                  "sample_url": None, "parents": set()})
+    current_page = None
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        payload = event.get("payload") or {}
+        url = payload.get("url") or ""
+        if not url.startswith("http"):
+            continue
+        etype = event.get("type", "")
+        if etype in ("visit_start", "framenavigated"):
+            current_page = url
+        host = host_of(url)
+        if not host or "127.0.0.1" in host or "localhost" in host \
+                or "host.docker.internal" in host:
+            continue
+        rec = single[host]
+        rec["count"] += 1
+        rec["roles"].add(ROLE_BY_EVENT.get(etype, etype))
+        rec["sessions"].add(session_id)
+        if rec["sample_url"] is None:
+            rec["sample_url"] = url
+        if current_page and host_of(current_page) != host:
+            rec["parents"].add(current_page)
+
+    return store(db, single)
+
+
+def contacts_for(db, url: str, enricher=None) -> dict:
+    """Which third parties a target contacted, and what the feeds say.
+
+    This is the answer to the question a per-page score cannot reach: the
+    publisher may do nothing convictable itself while loading infrastructure
+    the world already knows. Joins target -> sessions -> hosts -> intel.
+    """
+    db.conn.executescript(SCHEMA)
+    sessions = [r["session_id"] for r in db.conn.execute(
+        "SELECT DISTINCT session_id FROM verdicts WHERE url = ?", (url,))]
+    if not sessions:
+        return {"url": url, "total": 0, "flagged": [], "clean": [],
+                "unchecked": [], "sessions": []}
+
+    flagged, clean, unchecked = [], [], []
+    for row in db.conn.execute("SELECT * FROM third_party_hosts"):
+        # Match on the session that saw it, OR on the page that loaded it.
+        # Session ids and timeline filenames diverge whenever a hunt runs
+        # somewhere else, and a contact must not vanish because of that.
+        seen_in = set(json.loads(row["sessions"]))
+        parents = json.loads(row["parent_urls"])
+        by_session = bool(seen_in & set(sessions))
+        by_parent = any(p == url or host_of(p) == host_of(url) for p in parents)
+        if not (by_session or by_parent):
+            continue
+        if is_boring(row["host"]):
+            continue
+
+        entry = {"host": row["host"],
+                 "roles": json.loads(row["roles"]),
+                 "hits": row["hit_count"]}
+
+        results = db.conn.execute(
+            "SELECT provider, verdict, score, detail FROM intel_lookups "
+            "WHERE host = ?", (row["host"],)).fetchall()
+        if not results:
+            unchecked.append(entry)
+            continue
+
+        bad = [r for r in results if r["verdict"] in ("malicious", "suspicious")]
+        if bad:
+            worst = max(bad, key=lambda r: 0 if r["verdict"] == "suspicious" else 1)
+            entry["verdict"] = worst["verdict"]
+            entry["flagged_by"] = sorted({r["provider"] for r in bad})
+            entry["detail"] = json.loads(worst["detail"])
+            flagged.append(entry)
+        else:
+            entry["verdict"] = "clean"
+            clean.append(entry)
+
+    order = {"malicious": 0, "suspicious": 1}
+    flagged.sort(key=lambda e: (order.get(e["verdict"], 9), -e["hits"]))
+    clean.sort(key=lambda e: -e["hits"])
+    unchecked.sort(key=lambda e: -e["hits"])
+
+    return {"url": url, "sessions": sessions,
+            "total": len(flagged) + len(clean) + len(unchecked),
+            "flagged": flagged, "clean": clean, "unchecked": unchecked}

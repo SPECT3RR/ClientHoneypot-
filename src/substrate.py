@@ -189,6 +189,16 @@ class DockerSubstrate(Substrate):
         if not drop.exists():
             return []
 
+        # Timelines first: the verdict is the headline, the timeline is the
+        # third-party evidence behind it.
+        reports = root / "reports"
+        reports.mkdir(parents=True, exist_ok=True)
+        for tl in drop.glob("*_timeline.jsonl"):
+            try:
+                tl.replace(reports / tl.name)
+            except OSError:
+                pass
+
         ingested = []
         for path in sorted(drop.glob("*.json")):
             try:

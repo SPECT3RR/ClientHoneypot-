@@ -48,6 +48,18 @@ def _drop_result(url, verdict, scorer, decision, detector) -> None:
             "decision": decision,
             "actions": detector.summary(),
         }, default=str, indent=2), encoding="utf-8")
+
+        # The forensic timeline has to come out too. Under the hardened
+        # substrate reports/ is no longer mounted, so without this every
+        # containerised hunt loses its third-party evidence when the
+        # container exits.
+        import shutil
+        src = Path(__file__).parent.parent / "reports"
+        for tl in src.glob("*_timeline.jsonl"):
+            try:
+                shutil.copy2(tl, path / tl.name)
+            except OSError:
+                pass
     except OSError:
         pass
 

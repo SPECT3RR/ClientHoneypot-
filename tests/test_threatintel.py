@@ -281,3 +281,69 @@ def test_an_unexpected_provider_status_is_unknown_not_clean():
     import inspect
     src = inspect.getsource(ti.ThreatFox.lookup)
     assert '"verdict": "unknown"' in src
+
+
+# ── per-target contacts ────────────────────────────────────────────────────
+
+def test_contacts_are_attributed_to_the_target_that_loaded_them(db, tmp_path):
+    """The question a per-page score cannot answer: what did this page reach
+    out to, and is any of it known bad?"""
+    _timeline(tmp_path, "sess1", [
+        _evt("visit_start", "http://publisher.test/"),
+        _evt("redirect", "https://broker.test/go"),
+        _evt("request", "https://tracker.test/px"),
+    ])
+    tp.store(db, tp.harvest_timelines(tmp_path))
+    db.record_verdict("http://publisher.test/", 5, [], [], "continue")
+    db.conn.execute("UPDATE verdicts SET session_id='sess1' WHERE url=?",
+                    ("http://publisher.test/",))
+    db.conn.commit()
+
+    c = tp.contacts_for(db, "http://publisher.test/")
+    hosts = {e["host"] for e in c["unchecked"]}
+    assert "broker.test" in hosts and "tracker.test" in hosts
+
+
+def test_a_flagged_contact_is_separated_from_a_clean_one(db, tmp_path):
+    _timeline(tmp_path, "s1", [
+        _evt("visit_start", "http://pub.test/"),
+        _evt("redirect", "https://bad.test/x"),
+        _evt("request", "https://ok.test/y"),
+    ])
+    tp.store(db, tp.harvest_timelines(tmp_path))
+    db.record_verdict("http://pub.test/", 0, [], [], "continue")
+    db.conn.execute("UPDATE verdicts SET session_id='s1'")
+    import time
+    for host, verdict in (("bad.test", "malicious"), ("ok.test", "clean")):
+        db.conn.execute(
+            "INSERT OR REPLACE INTO intel_lookups "
+            "(host, provider, verdict, score, detail, checked_ts) "
+            "VALUES (?,?,?,?,'{}',?)", (host, "virustotal", verdict, 5, time.time()))
+    db.conn.commit()
+
+    c = tp.contacts_for(db, "http://pub.test/")
+    assert [e["host"] for e in c["flagged"]] == ["bad.test"]
+    assert [e["host"] for e in c["clean"]] == ["ok.test"]
+    assert c["flagged"][0]["flagged_by"] == ["virustotal"]
+
+
+def test_the_join_survives_a_session_id_mismatch(db, tmp_path):
+    """Timeline names and verdict session ids diverge whenever a hunt runs
+    somewhere else — a contact must not vanish because of that."""
+    _timeline(tmp_path, "other_session", [
+        _evt("visit_start", "http://pub.test/"),
+        _evt("redirect", "https://broker.test/go"),
+    ])
+    tp.store(db, tp.harvest_timelines(tmp_path))
+    db.record_verdict("http://pub.test/", 0, [], [], "continue")   # different id
+    c = tp.contacts_for(db, "http://pub.test/")
+    assert any(e["host"] == "broker.test"
+               for e in c["unchecked"] + c["flagged"] + c["clean"])
+
+
+def test_harvest_session_scopes_to_one_timeline(db, tmp_path):
+    _timeline(tmp_path, "a", [_evt("request", "https://one.test/x")])
+    _timeline(tmp_path, "b", [_evt("request", "https://two.test/x")])
+    tp.harvest_session(db, "a", tmp_path)
+    hosts = {r["host"] for r in db.conn.execute("SELECT host FROM third_party_hosts")}
+    assert hosts == {"one.test"}

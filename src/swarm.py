@@ -31,6 +31,9 @@ from canary_vault import default_seed_tokens
 from discovery import Discovery, DiscoveryQueue, permissive_args
 import capacity
 import substrate as substrate_mod
+import third_party
+import threatintel
+import intel_keys
 
 
 class WorkerState:
@@ -78,6 +81,12 @@ class SwarmManager:
         # machine has no boundary for. Never None: a missing substrate would
         # silently mean "no gate".
         self.substrate = substrate or substrate_mod.load()
+        # Feeds are consulted automatically after every session, so a hunt
+        # answers "what did this contact, and is any of it known bad?" without
+        # the operator remembering to press anything.
+        self.intel_keys = intel_keys.expand(intel_keys.load())
+        self.auto_enrich = bool(self.intel_keys)
+        self.enrich_budget = 8      # per session; free quotas are small
 
         # Self-seed the vault so swarm sessions plant *tracked* bait. Without
         # this the seeder still writes synthetic credentials, but nothing is
@@ -383,6 +392,7 @@ class SwarmManager:
             await bus.stop()
             if state.status not in ("cancelled", "error"):
                 state.status = "done"
+            self._post_session(state, entry.url)
             self.completed += 1
             tag = (f"{state.kind}" if state.kind == "anchor"
                    else f"child d{state.depth} via {state.trigger} "
@@ -390,6 +400,31 @@ class SwarmManager:
             print(f"[worker {state.worker_id}] ({tag}) {entry.url} -> "
                   f"{state.verdict} (score {state.score})"
                   + (f" spawned {state.spawned}" if state.spawned else ""))
+
+    def _post_session(self, state, url: str) -> None:
+        """Harvest this session's third-party contacts and check the new ones.
+
+        Runs for every completed hunt, not on a button. Bounded per session
+        because the free quotas are small and a busy ad page can contact
+        dozens of hosts.
+        """
+        try:
+            third_party.harvest_session(self.db, state.session_id)
+        except Exception:
+            return
+        if not self.auto_enrich:
+            return
+        try:
+            enricher = threatintel.Enricher(self.db, self.intel_keys)
+            contacts = third_party.contacts_for(self.db, url)
+            for entry in contacts["unchecked"][:self.enrich_budget]:
+                verdict = threatintel.consensus(enricher.lookup(entry["host"]))
+                if verdict["verdict"] in ("malicious", "suspicious"):
+                    print(f"    [intel] {entry['host']} -> "
+                          f"{verdict['verdict'].upper()} per "
+                          f"{', '.join(verdict['flagged_by'])}")
+        except Exception:
+            pass
 
     async def _containerised_session(self, state: WorkerState, entry) -> None:
         """Delegate one session to a disposable container in the WSL2 VM.
@@ -412,6 +447,11 @@ class SwarmManager:
             state.status = "error"
             traceback.print_exc()
         finally:
+            try:
+                self.substrate.ingest_results(self.db)
+            except Exception:
+                pass
+            self._post_session(state, entry.url)
             row = None
             try:
                 row = self.db.lookup(entry.url)
