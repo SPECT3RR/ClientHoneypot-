@@ -253,18 +253,54 @@ class ThreatFox(Provider):
 
     def lookup(self, host: str) -> dict:
         self.limiter.wait()
-        data = _post_json("https://threatfox-api.abuse.ch/api/v1/",
-                          {"query": "search_ioc", "search_term": host},
-                          headers={"Auth-Key": self.api_key})
-        if data.get("query_status") != "ok":
-            return {"verdict": "clean", "score": 0,
-                    "detail": {"status": data.get("query_status")}}
-        iocs = data.get("data") or []
-        return {"verdict": "malicious" if iocs else "clean",
-                "score": len(iocs),
-                "detail": {"iocs": len(iocs),
+        # ThreatFox takes a JSON body, unlike URLhaus which is form-encoded on
+        # the same domain. Sending urlencoded returns query_status "no_json",
+        # which parsed as "clean" -- so every host came back fine and the feed
+        # silently contributed nothing.
+        payload = json.dumps({"query": "search_ioc",
+                              "search_term": host}).encode()
+        req = urllib.request.Request(
+            "https://threatfox-api.abuse.ch/api/v1/", data=payload,
+            method="POST")
+        req.add_header("Content-Type", "application/json")
+        req.add_header("Auth-Key", self.api_key)
+        req.add_header("User-Agent", USER_AGENT)
+        with urllib.request.urlopen(req, timeout=20,
+                                    context=_SSL_CONTEXT) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+
+        status = data.get("query_status")
+        if status in ("no_result", "no_results"):
+            return {"verdict": "clean", "score": 0, "detail": {"status": status}}
+        if status != "ok":
+            # Never "clean": a malformed request reading as "nothing found" is
+            # how a feed stops contributing without anyone noticing.
+            return {"verdict": "unknown", "score": 0, "detail": {"status": status}}
+        # search_ioc is a substring search: it returns every IOC that merely
+        # MENTIONS the term. Unfiltered, google.com came back with 33 IOCs and
+        # a "malicious" verdict. Only an IOC that IS this host counts.
+        exact = [i for i in (data.get("data") or [])
+                 if self._is_exact(i, host)]
+        return {"verdict": "malicious" if exact else "clean",
+                "score": len(exact),
+                "detail": {"iocs": len(exact),
+                           "considered": len(data.get("data") or []),
                            "malware": sorted({i.get("malware_printable")
-                                              for i in iocs if i.get("malware_printable")})[:8]}}
+                                              for i in exact
+                                              if i.get("malware_printable")})[:8]}}
+
+    @staticmethod
+    def _is_exact(ioc: dict, host: str) -> bool:
+        value = (ioc.get("ioc") or "").strip().lower()
+        host = host.lower()
+        kind = (ioc.get("ioc_type") or "").lower()
+        if not value:
+            return False
+        if kind in ("domain", "hostname"):
+            return value == host
+        if kind in ("url",):
+            return urllib.parse.urlparse(value).netloc.split(":")[0] == host
+        return False
 
 
 class URLScan(Provider):

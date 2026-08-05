@@ -258,3 +258,26 @@ def test_safebrowsing_is_the_deepest_fallback():
 
 def test_six_providers_are_available_to_fall_back_through():
     assert len(ti.PROVIDERS) == 6
+
+
+def test_threatfox_requires_an_exact_host_match():
+    """search_ioc is a substring search: it returns every IOC that merely
+    MENTIONS the term. Unfiltered it called google.com malicious on 33 IOCs
+    that only referenced it."""
+    tf = ti.ThreatFox("k")
+    assert tf._is_exact({"ioc": "evil.test", "ioc_type": "domain"}, "evil.test")
+    assert tf._is_exact({"ioc": "http://evil.test/x", "ioc_type": "url"}, "evil.test")
+    # merely mentioning the host is not the host
+    assert not tf._is_exact({"ioc": "http://other.test/?r=google.com",
+                             "ioc_type": "url"}, "google.com")
+    assert not tf._is_exact({"ioc": "1.2.3.4:80", "ioc_type": "ip:port"}, "google.com")
+    assert not tf._is_exact({"ioc": "", "ioc_type": "domain"}, "google.com")
+
+
+def test_an_unexpected_provider_status_is_unknown_not_clean():
+    """A malformed request reading as 'nothing found' is how a feed stops
+    contributing without anyone noticing — ThreatFox returned no_json for
+    every host until the body format was fixed."""
+    import inspect
+    src = inspect.getsource(ti.ThreatFox.lookup)
+    assert '"verdict": "unknown"' in src
