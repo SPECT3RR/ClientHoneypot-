@@ -150,94 +150,7 @@
 
 <main>
 
-<!-- ══ NEEDS YOU NOW ═══════════════════════════════════════════════════ -->
-<div class="band">
-  <h3>Needs you now</h3>
-  <div class="cols c2">
-
-    <div class="panel {% if interventions %}alert{% endif %}">
-      <h4>Blocked bots
-        <span class="badge {% if not interventions %}zero{% endif %}"
-              id="b-int">{{ interventions|length }}</span>
-        <span class="sub">a bot hit a wall and is holding the tab for you</span>
-      </h4>
-      {% if interventions %}
-      <table>
-        <thead><tr><th>#</th><th>target</th><th>why</th><th>waiting</th><th></th></tr></thead>
-        <tbody>
-        {% for i in interventions %}
-          <tr>
-            <td>{{ i.id }}</td>
-            <td><span class="url">{{ i.url }}</span></td>
-            <td class="parked">{{ i.reason }}</td>
-            <td>{{ i.age_seconds }}s</td>
-            <td style="white-space:nowrap">
-              <form method="post" action="/intervention/{{ i.id }}/resolve"
-                    style="display:inline">
-                <button class="primary" type="submit">Solved &rarr; resume</button>
-              </form>
-              <form method="post" action="/intervention/{{ i.id }}/skip"
-                    style="display:inline">
-                <button class="danger" type="submit">Skip</button>
-              </form>
-            </td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-      {% else %}
-        <div class="empty">no bots blocked</div>
-      {% endif %}
-    </div>
-
-    <div class="panel {% if visitors.humans or canary_hits %}hot{% endif %}">
-      <h4>Attacker engagement
-        <span class="badge {% if not visitors.humans %}zero{% endif %}"
-              id="b-hum">{{ visitors.humans|length }}</span>
-        <span class="sub">humans inside the decoy, and bait that has fired</span>
-      </h4>
-
-      {% if visitors.offline %}
-        <div class="empty">decoy offline &mdash; start <code>python decoy_app/app.py</code></div>
-      {% elif visitors.humans %}
-        <table>
-          <thead><tr><th>visitor</th><th>score</th><th>tier</th><th>evidence</th></tr></thead>
-          <tbody>
-          {% for h in visitors.humans %}
-            <tr><td><span class="url">{{ h.src_ip or h.visitor_id }}</span></td>
-                <td><span class="tag human_operator">{{ h.score }}</span></td>
-                <td>{{ h.tier_reached }}</td>
-                <td class="muted"><span class="url">{{ h.signals|join(', ') }}</span></td></tr>
-          {% endfor %}
-          </tbody>
-        </table>
-      {% else %}
-        <div class="empty">no human operator has reached the decoy</div>
-      {% endif %}
-
-      {% if canary_hits %}
-      <h4 style="margin-top:14px">Canary hits
-        <span class="sub">bait used from attacker infrastructure</span></h4>
-      <div class="scroll" style="max-height:150px">
-      <table>
-        <thead><tr><th>token</th><th>src ip</th><th>user-agent</th><th>planted in</th></tr></thead>
-        <tbody>
-        {% for h in canary_hits %}
-          <tr><td><span class="tag malicious">{{ h.label or h.kind }}</span></td>
-              <td>{{ h.src_ip }}</td>
-              <td><span class="url">{{ h.user_agent }}</span></td>
-              <td class="muted"><span class="url">{{ h.session_id }}</span></td></tr>
-        {% endfor %}
-        </tbody>
-      </table>
-      </div>
-      {% endif %}
-    </div>
-
-  </div>
-</div>
-
-<!-- ══ OPERATE ═════════════════════════════════════════════════════════ -->
+<!-- ══ CONTROL ═════════════════════════════════════════════════════════ -->
 <div class="band">
   <h3>Operate</h3>
   <div class="cols c3">
@@ -373,6 +286,186 @@
       </div>
     </div>
 
+  </div>
+</div>
+
+<!-- ══ NEEDS YOU NOW ═══════════════════════════════════════════════════ -->
+<div class="band">
+  <h3>Needs you now</h3>
+  <div class="cols c2">
+
+    <div class="panel {% if interventions %}alert{% endif %}">
+      <h4>Blocked bots
+        <span class="badge {% if not interventions %}zero{% endif %}"
+              id="b-int">{{ interventions|length }}</span>
+        <span class="sub">a bot hit a wall and is holding the tab for you</span>
+      </h4>
+      {% if interventions %}
+      <table>
+        <thead><tr><th>#</th><th>target</th><th>why</th><th>waiting</th><th></th></tr></thead>
+        <tbody>
+        {% for i in interventions %}
+          <tr>
+            <td>{{ i.id }}</td>
+            <td><span class="url">{{ i.url }}</span></td>
+            <td class="parked">{{ i.reason }}</td>
+            <td>{{ i.age_seconds }}s</td>
+            <td style="white-space:nowrap">
+              <form method="post" action="/intervention/{{ i.id }}/resolve"
+                    style="display:inline">
+                <button class="primary" type="submit">Solved &rarr; resume</button>
+              </form>
+              <form method="post" action="/intervention/{{ i.id }}/skip"
+                    style="display:inline">
+                <button class="danger" type="submit">Skip</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+        <div class="empty">no bots blocked</div>
+      {% endif %}
+    </div>
+
+    <div class="panel {% if visitors.humans or canary_hits %}hot{% endif %}">
+      <h4>Attacker engagement
+        <span class="badge {% if not visitors.humans %}zero{% endif %}"
+              id="b-hum">{{ visitors.humans|length }}</span>
+        <span class="sub">humans inside the decoy, and bait that has fired</span>
+      </h4>
+
+      {% if visitors.offline %}
+        <div class="empty">decoy offline &mdash; start <code>python decoy_app/app.py</code></div>
+      {% elif visitors.humans %}
+        <table>
+          <thead><tr><th>visitor</th><th>score</th><th>tier</th><th>evidence</th></tr></thead>
+          <tbody>
+          {% for h in visitors.humans %}
+            <tr><td><span class="url">{{ h.src_ip or h.visitor_id }}</span></td>
+                <td><span class="tag human_operator">{{ h.score }}</span></td>
+                <td>{{ h.tier_reached }}</td>
+                <td class="muted"><span class="url">{{ h.signals|join(', ') }}</span></td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty">no human operator has reached the decoy</div>
+      {% endif %}
+
+      {% if canary_hits %}
+      <h4 style="margin-top:14px">Canary hits
+        <span class="sub">bait used from attacker infrastructure</span></h4>
+      <div class="scroll" style="max-height:150px">
+      <table>
+        <thead><tr><th>token</th><th>src ip</th><th>user-agent</th><th>planted in</th></tr></thead>
+        <tbody>
+        {% for h in canary_hits %}
+          <tr><td><span class="tag malicious">{{ h.label or h.kind }}</span></td>
+              <td>{{ h.src_ip }}</td>
+              <td><span class="url">{{ h.user_agent }}</span></td>
+              <td class="muted"><span class="url">{{ h.session_id }}</span></td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+
+<!-- ══ RESULTS ═════════════════════════════════════════════════════════ -->
+<div class="band">
+  <h3>Results &mdash; your ruling required</h3>
+  <div class="cols" style="grid-template-columns:1fr">
+    <div class="panel {% if pending_review %}alert{% endif %}">
+      <h4>Findings awaiting review
+        <span class="badge {% if not pending_review %}zero{% endif %}">{{ pending_review|length }}</span>
+        <span class="sub">
+          only findings that cleared the confidence floor appear here &mdash;
+          {{ triage_stats.confirmed }} confirmed,
+          {{ triage_stats.rejected }} false positive{% if triage_stats.rejected != 1 %}s{% endif %}
+          {% if triage_stats.false_positive_rate is not none %}
+            &middot; FP rate {{ (triage_stats.false_positive_rate * 100)|round(1) }}%
+          {% endif %}
+        </span>
+      </h4>
+
+      {% for f in pending_review %}
+      <div style="border:1px solid var(--line);border-radius:6px;
+                  padding:12px;margin-bottom:11px;background:var(--panel2)">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <span class="tag {{ f.verdict }}">{{ f.verdict }}</span>
+          <b>{{ f.score }}</b><span class="muted">/ {{ f.threshold }} threshold</span>
+          <span class="muted">confidence {{ f.confidence }}</span>
+          <span class="url" style="max-width:520px">{{ f.url }}</span>
+        </div>
+
+        <p style="margin:9px 0 8px">{{ f.summary }}</p>
+
+        {% if f.clusters %}
+        <div style="margin-bottom:8px">
+          {% for c in f.clusters %}
+            <div class="malicious" style="font-size:12px">
+              ▸ correlated pattern <b>{{ c.name }}</b> (+{{ c.bonus }}) &mdash; {{ c.why }}
+            </div>
+            <div class="muted" style="font-size:11px;margin-left:14px">
+              needed together: {{ c.required|join(', ') }} &middot; {{ c.mitre }}
+            </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if f.actions %}
+        <div style="margin-bottom:8px">
+          {% for a in f.actions %}
+            <div style="font-size:12px" class="{% if a.severity in ('CRITICAL','HIGH') %}malicious{% else %}muted{% endif %}">
+              ▸ observed [{{ a.severity }}] {{ a.kind }} &mdash; {{ a.means }}
+            </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if f.signals %}
+        <details>
+          <summary class="muted" style="cursor:pointer;font-size:11px">
+            the exact signals that decided this ({{ f.signals|length }})
+          </summary>
+          <table style="margin-top:7px">
+            <thead><tr><th>signal</th><th>weight</th><th>meaning</th><th>att&amp;ck</th></tr></thead>
+            <tbody>
+            {% for s in f.signals %}
+              <tr><td><code>{{ s.label }}</code></td>
+                  <td>+{{ s.weight }}</td>
+                  <td>{{ s.means }}</td>
+                  <td class="muted">{{ s.mitre }}</td></tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </details>
+        {% endif %}
+
+        <form method="post" action="/triage/confirmed" class="inline" style="margin-top:10px">
+          <input type="hidden" name="url" value="{{ f.url }}">
+          <div style="flex:1"><input name="note" placeholder="note (optional)"
+                                     style="width:100%"></div>
+          <div style="flex:0 0 auto">
+            <button class="primary" type="submit">Confirm malicious</button></div>
+        </form>
+        <form method="post" action="/triage/rejected" style="margin-top:6px">
+          <input type="hidden" name="url" value="{{ f.url }}">
+          <button class="danger" type="submit">False positive &mdash; clear it</button>
+        </form>
+      </div>
+      {% else %}
+        <div class="empty">
+          nothing is waiting on you. Weak single signals are logged but never
+          surfaced &mdash; surfacing them is how a detector learns to cry wolf.
+        </div>
+      {% endfor %}
+    </div>
   </div>
 </div>
 

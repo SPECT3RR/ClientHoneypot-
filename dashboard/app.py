@@ -32,6 +32,7 @@ from url_queue import URLQueue                 # noqa: E402
 from swarm import SwarmManager                 # noqa: E402
 import capacity                                # noqa: E402
 import substrate as substrate_mod              # noqa: E402
+from evidence import TriageStore, explain      # noqa: E402
 import urllib.request                          # noqa: E402
 
 DECOY_BASE = "http://127.0.0.1:8001"
@@ -45,6 +46,7 @@ DB = VerdictDB(session_id="dashboard")
 VAULT = CanaryVault(DB)
 QUEUE = URLQueue(rate_per_minute=30)
 INTERVENTIONS = InterventionQueue(db=DB)
+TRIAGE = TriageStore(DB)
 SUBSTRATE = substrate_mod.load()
 # Headed by default: a human cannot take over a headless browser, so running
 # headless silently makes the intervention queue unable to do its job.
@@ -201,6 +203,8 @@ async def index(request: Request):
         "canary_stats": VAULT.stats(),
         "verdicts": DB.recent(40),
         "db_stats": DB.stats(),
+        "pending_review": TRIAGE.pending(12),
+        "triage_stats": TRIAGE.stats(),
         "alerts": ALERTS[:40],
         "placements": PLACEMENTS,
         "kinds": KINDS,
@@ -278,6 +282,33 @@ async def upload_urls(file: UploadFile = File(...)):
     alert("queue", f"{file.filename}: {added} queued, {skipped} skipped "
                    f"(already seen or duplicate) — {len(QUEUE)} pending")
     return RedirectResponse("/", status_code=303)
+
+
+# ── triage ─────────────────────────────────────────────────────────────────
+
+@app.post("/triage/{decision}")
+async def triage(decision: str, url: str = Form(...), note: str = Form(None)):
+    """The operator's ruling on a surfaced finding.
+
+    Confirmed goes to the malicious database. Rejected clears the verdict so
+    a consuming RBI stops isolating it, excludes it from future queues, and
+    is kept as a labelled false positive — the only honest way to tune the
+    thresholds later.
+    """
+    if decision not in ("confirmed", "rejected"):
+        return RedirectResponse("/", status_code=303)
+    if TRIAGE.decide(url, decision, note=note):
+        verb = ("confirmed malicious" if decision == "confirmed"
+                else "marked false positive and cleared")
+        alert("triage", f"{url} — {verb}")
+    return RedirectResponse("/", status_code=303)
+
+
+@app.get("/api/evidence")
+async def api_evidence(url: str):
+    """Full reasoning behind one verdict, for the RBI modules and Wazuh."""
+    row = DB.lookup(url)
+    return explain(row) if row else {"url": url, "verdict": "unknown"}
 
 
 # ── capacity ───────────────────────────────────────────────────────────────
