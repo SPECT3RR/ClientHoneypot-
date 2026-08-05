@@ -33,6 +33,8 @@ from swarm import SwarmManager                 # noqa: E402
 import capacity                                # noqa: E402
 import substrate as substrate_mod              # noqa: E402
 from evidence import TriageStore, explain      # noqa: E402
+import third_party                             # noqa: E402
+import threatintel                             # noqa: E402
 import urllib.request                          # noqa: E402
 
 DECOY_BASE = "http://127.0.0.1:8001"
@@ -93,6 +95,9 @@ def system_state(interventions: list, visitors: dict, hits: list) -> str:
 
 ALERTS: list = []
 PAUSED: list = []          # containers the dashboard stopped, so it can restore them
+# Feed keys live in memory only: a key pasted into a dashboard should not end
+# up in a file the operator forgets about.
+INTEL_KEYS: dict = {}
 _subscribers: list = []
 
 URL_RE = re.compile(r"https?://[^\s\"'<>,;]+", re.IGNORECASE)
@@ -175,6 +180,21 @@ INTERVENTIONS.subscribe(lambda i: alert(
     else f"Intervention #{i['id']} {i['status']}", i))
 
 
+def _third_party_view(limit: int = 20) -> list:
+    """Shortlist plus whatever the feeds have said about each host."""
+    enricher = threatintel.Enricher(DB, INTEL_KEYS)
+    out = []
+    for entry in third_party.priority_hosts(DB, limit=limit):
+        cached = enricher.cached(entry["host"])
+        entry["intel"] = threatintel.consensus(cached) if cached else None
+        entry["providers"] = cached
+        out.append(entry)
+    # Anything a feed flagged floats to the top; it outranks hit count.
+    rank = {"malicious": 0, "suspicious": 1}
+    out.sort(key=lambda e: rank.get((e["intel"] or {}).get("verdict"), 9))
+    return out
+
+
 @app.on_event("startup")
 async def _start_swarm():
     asyncio.create_task(SWARM.run())
@@ -205,6 +225,11 @@ async def index(request: Request):
         "db_stats": DB.stats(),
         "pending_review": TRIAGE.pending(12),
         "triage_stats": TRIAGE.stats(),
+        "intel_stats": third_party.stats(DB),
+        "intel_active": threatintel.Enricher(DB, INTEL_KEYS).active(),
+        "intel_missing": threatintel.Enricher(DB, INTEL_KEYS).missing_keys(),
+        "intel_providers": sorted(threatintel.PROVIDERS),
+        "third_party": _third_party_view(20),
         "alerts": ALERTS[:40],
         "placements": PLACEMENTS,
         "kinds": KINDS,
@@ -309,6 +334,74 @@ async def api_evidence(url: str):
     """Full reasoning behind one verdict, for the RBI modules and Wazuh."""
     row = DB.lookup(url)
     return explain(row) if row else {"url": url, "verdict": "unknown"}
+
+
+# ── threat intel ───────────────────────────────────────────────────────────
+
+@app.post("/intel/key")
+async def set_intel_key(provider: str = Form(...), key: str = Form(...)):
+    """Store a feed API key for this session.
+
+    Kept in memory only — a key pasted into a dashboard should not end up in
+    a file the operator forgets about. Re-enter after a restart.
+    """
+    key = (key or "").strip()
+    if provider not in threatintel.PROVIDERS or not key:
+        alert("error", f"unknown provider or empty key: {provider!r}")
+        return RedirectResponse("/", status_code=303)
+    INTEL_KEYS[provider] = key
+    # abuse.ch issues one key that covers both of its services.
+    if provider in ("urlhaus", "threatfox"):
+        INTEL_KEYS.setdefault("urlhaus", key)
+        INTEL_KEYS.setdefault("threatfox", key)
+    alert("intel", f"{provider} key set — "
+                   f"{len(threatintel.Enricher(DB, INTEL_KEYS).active())} provider(s) active")
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/intel/harvest")
+async def harvest_hosts():
+    """Inventory every third-party host the past hunts touched."""
+    found = third_party.harvest_timelines()
+    n = third_party.store(DB, found)
+    alert("intel", f"harvested {n} third-party hosts from the forensic timelines")
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/intel/scan")
+async def scan_hosts(limit: int = Form(20)):
+    """Look up the shortlist against every provider that has a key.
+
+    Bounded per click because free quotas are small — VirusTotal allows four
+    requests a minute — and the shortlist is ordered so the quota is spent on
+    redirect targets and popup destinations rather than CDNs.
+    """
+    enricher = threatintel.Enricher(DB, INTEL_KEYS)
+    if not enricher.active():
+        alert("error", "no provider has a key yet — add one above. "
+                       "auth.abuse.ch is free and covers URLhaus + ThreatFox.")
+        return RedirectResponse("/", status_code=303)
+
+    hosts = third_party.priority_hosts(DB, limit=int(limit))
+    flagged = 0
+    for entry in hosts:
+        verdict = threatintel.consensus(enricher.lookup(entry["host"]))
+        if verdict["verdict"] in ("malicious", "suspicious"):
+            flagged += 1
+            alert("intel", f"{entry['host']} — {verdict['verdict'].upper()} "
+                           f"per {', '.join(verdict['flagged_by'])}")
+    alert("intel", f"checked {len(hosts)} host(s) via "
+                   f"{', '.join(enricher.active())}: {flagged} flagged")
+    return RedirectResponse("/", status_code=303)
+
+
+@app.get("/api/intel")
+async def api_intel(host: str):
+    """Everything known about one third-party host."""
+    enricher = threatintel.Enricher(DB, INTEL_KEYS)
+    results = enricher.cached(host)
+    return {"host": host, "results": results,
+            "consensus": threatintel.consensus(results)}
 
 
 # ── capacity ───────────────────────────────────────────────────────────────

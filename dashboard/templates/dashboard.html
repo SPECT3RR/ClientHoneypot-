@@ -562,6 +562,101 @@
   </div>
 </div>
 
+<!-- ══ THREAT INTEL ════════════════════════════════════════════════════ -->
+<div class="band">
+  <h3>Third-party infrastructure &amp; threat feeds</h3>
+  <div class="cols c2">
+
+    <div class="panel">
+      <h4>Feed keys
+        <span class="sub">
+          {% if intel_active %}active: {{ intel_active|join(', ') }}
+          {% else %}no provider has a key yet{% endif %}
+        </span></h4>
+
+      <form method="post" action="/intel/key" class="inline">
+        <div style="flex:0 0 130px">
+          <label class="f">provider</label>
+          <select name="provider" style="width:100%">
+            {% for p in intel_providers %}
+              <option value="{{ p }}">{{ p }}{% if p in intel_active %} &#10003;{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div style="flex:2">
+          <label class="f">API key</label>
+          <input name="key" type="password" placeholder="paste key" style="width:100%">
+        </div>
+        <div style="flex:0 0 auto"><button class="primary" type="submit">Set</button></div>
+      </form>
+
+      <p class="muted" style="font-size:11px;margin:9px 0">
+        Held in memory only, never written to disk &mdash; re-enter after a restart.
+        All four are free: <b>auth.abuse.ch</b> issues one key covering
+        URLhaus + ThreatFox, <b>virustotal.com</b> gives 4 req/min,
+        <b>otx.alienvault.com</b> is generous.
+      </p>
+
+      <div style="margin:11px 0 9px">
+        <div class="stat"><b>{{ intel_stats.hosts }}</b><span>hosts seen</span></div>
+        <div class="stat"><b>{{ intel_stats.checked }}</b><span>checked</span></div>
+        <div class="stat"><b>{{ intel_stats.unchecked }}</b><span>unchecked</span></div>
+        <div class="stat"><b>{{ intel_stats.flagged }}</b><span>flagged</span></div>
+      </div>
+
+      <form method="post" action="/intel/harvest" style="display:inline">
+        <button type="submit">Re-harvest from timelines</button>
+      </form>
+      <form method="post" action="/intel/scan" class="inline" style="margin-top:8px">
+        <div style="flex:0 0 80px">
+          <label class="f">check top</label>
+          <input type="number" name="limit" value="20" min="1" max="200" style="width:100%">
+        </div>
+        <div style="flex:0 0 auto">
+          <button class="primary" type="submit">Look up against feeds</button></div>
+      </form>
+      <p class="muted" style="font-size:11px;margin-top:7px">
+        Bounded per click &mdash; free quotas are small, so the shortlist is
+        ordered to spend them on redirect targets and popup destinations
+        rather than CDNs. Answers are cached and never re-queried.
+      </p>
+    </div>
+
+    <div class="panel">
+      <h4>Third-party hosts
+        <span class="sub">what the hunted pages reached out to &mdash; flagged first</span></h4>
+      <div class="scroll" style="max-height:330px">
+        <table>
+          <thead><tr><th>host</th><th>feeds</th><th>seen as</th><th>hits</th></tr></thead>
+          <tbody>
+          {% for h in third_party %}
+            <tr>
+              <td><span class="url" style="max-width:230px">{{ h.host }}</span></td>
+              <td>
+                {% if h.intel %}
+                  <span class="tag {{ h.intel.verdict }}">{{ h.intel.verdict }}</span>
+                  {% if h.intel.flagged_by %}
+                    <span class="muted" style="font-size:10px">{{ h.intel.flagged_by|join(',') }}</span>
+                  {% endif %}
+                {% else %}
+                  <span class="muted">unchecked</span>
+                {% endif %}
+              </td>
+              <td class="muted" style="font-size:11px">{{ h.roles|join(', ') }}</td>
+              <td>{{ h.hit_count }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4" class="empty">
+              nothing harvested yet &mdash; run a hunt, or re-harvest above</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+
 <!-- ══ DECOY + STREAM ══════════════════════════════════════════════════ -->
 <div class="band">
   <h3>Decoy &amp; activity</h3>
