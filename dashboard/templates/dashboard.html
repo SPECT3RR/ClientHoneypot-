@@ -715,6 +715,69 @@
   </div>
 </div>
 
+<!-- ══ SIEM + AUDIT ════════════════════════════════════════════════════ -->
+<div class="band">
+  <h3>Export &amp; accountability</h3>
+  <div class="cols c2">
+
+    <div class="panel">
+      <h4>SIEM export
+        <span class="sub">{{ siem_status.mode }} &middot;
+          {{ siem_status.sent }} shipped, {{ siem_status.failed }} failed</span></h4>
+      <p class="muted" style="font-size:11px;margin:0 0 9px">
+        Findings only &mdash; verdicts, compromise actions, canary hits, decoy
+        operators, blocked bots. Raw browser telemetry stays in the forensic
+        timeline; forwarding it would bury the events that matter.
+      </p>
+      <div style="font-size:11px;margin-bottom:9px">
+        <code style="display:block;padding:6px;white-space:pre-wrap">{{ siem_status.destination }}</code>
+      </div>
+      {% if siem_status.last_error %}
+        <p class="parked" style="font-size:11px">last error: {{ siem_status.last_error }}</p>
+      {% endif %}
+      <details>
+        <summary class="muted" style="cursor:pointer;font-size:11px">
+          Wazuh agent config &mdash; paste into ossec.conf</summary>
+        <pre style="font-size:10px;background:var(--panel2);padding:9px;
+                    border-radius:5px;overflow-x:auto">{{ wazuh_config }}</pre>
+      </details>
+    </div>
+
+    <div class="panel">
+      <h4>Audit log
+        <span class="sub">{{ audit_stats.entries }} entries &middot;
+          {{ audit_stats.sensitive }} sensitive</span></h4>
+      <p class="muted" style="font-size:11px;margin:0 0 9px">
+        Append-only. Who queued a target, who ruled a finding a false positive,
+        who changed containment.
+        {% if audit_stats.actors <= 1 %}
+          <span class="pill danger">no auth</span>
+          actor is unauthenticated &mdash; only the source address is real.
+        {% endif %}
+      </p>
+      <div class="scroll" style="max-height:250px">
+        <table>
+          <thead><tr><th>actor</th><th>did</th><th>target</th></tr></thead>
+          <tbody>
+          {% for a in audit %}
+            <tr {% if a.sensitive %}style="background:rgba(255,189,46,.06)"{% endif %}>
+              <td class="muted">{{ a.actor }}{% if a.source %}<br>
+                <span style="font-size:10px">{{ a.source }}</span>{% endif %}</td>
+              <td>{{ a.described }}
+                {% if a.sensitive %}<span class="tag suspicious">sensitive</span>{% endif %}</td>
+              <td><span class="url" style="max-width:200px">{{ a.target or '' }}</span></td>
+            </tr>
+          {% else %}
+            <tr><td colspan="3" class="empty">nothing recorded yet</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+
 <!-- ══ DECOY + STREAM ══════════════════════════════════════════════════ -->
 <div class="band">
   <h3>Decoy &amp; activity</h3>

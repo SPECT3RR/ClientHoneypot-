@@ -1,0 +1,16 @@
+{"ts": 1785953761.5272152, "actor": "operator", "source": "testclient", "action": "queue.add", "target": null, "detail": {"added": 1, "pending": 1}, "sensitive": false}
+{"ts": 1785953761.5572705, "actor": "operator", "source": "testclient", "action": "swarm.target", "target": null, "detail": {"requested": 0, "allowed": 0}, "sensitive": false}
+{"ts": 1785953761.5646784, "actor": "operator", "source": "testclient", "action": "swarm.kill", "target": null, "detail": {}, "sensitive": true}
+{"ts": 1785953761.5763216, "actor": "operator", "source": "testclient", "action": "canary.add", "target": "t", "detail": {"kind": "url_token", "placement": "browser_profile", "label": "t"}, "sensitive": false}
+{"ts": 1785953761.5837631, "actor": "operator", "source": "testclient", "action": "queue.add", "target": null, "detail": {"added": 1, "pending": 2}, "sensitive": false}
+{"ts": 1785953761.5916355, "actor": "operator", "source": "testclient", "action": "swarm.target", "target": null, "detail": {"requested": 0, "allowed": 0}, "sensitive": false}
+{"ts": 1785953761.6370375, "actor": "operator", "source": "testclient", "action": "intel.key.set", "target": "virustotal", "detail": {}, "sensitive": true}
+{"ts": 1785953840.5202026, "actor": "operator", "source": "testclient", "action": "queue.add", "target": null, "detail": {"added": 1, "pending": 1}, "sensitive": false}
+{"ts": 1785953840.536664, "actor": "operator", "source": "testclient", "action": "swarm.target", "target": null, "detail": {"requested": 0, "allowed": 0}, "sensitive": false}
+{"ts": 1785953840.553744, "actor": "operator", "source": "testclient", "action": "swarm.kill", "target": null, "detail": {}, "sensitive": true}
+{"ts": 1785953840.572764, "actor": "operator", "source": "testclient", "action": "canary.add", "target": "t", "detail": {"kind": "url_token", "placement": "browser_profile", "label": "t"}, "sensitive": false}
+{"ts": 1785953840.5894473, "actor": "operator", "source": "testclient", "action": "queue.add", "target": null, "detail": {"added": 1, "pending": 2}, "sensitive": false}
+{"ts": 1785953840.603366, "actor": "operator", "source": "testclient", "action": "swarm.target", "target": null, "detail": {"requested": 0, "allowed": 0}, "sensitive": false}
+{"ts": 1785953840.6756046, "actor": "operator", "source": "testclient", "action": "intel.key.set", "target": "virustotal", "detail": {}, "sensitive": true}
+{"ts": 1785953844.9815137, "actor": "operator", "source": "testclient", "action": "queue.add", "target": null, "detail": {"added": 1, "pending": 1}, "sensitive": false}
+{"ts": 1785953844.998787, "actor": "operator", "source": "testclient", "action": "triage.confirm", "target": "http://localhost:8081/", "detail": {"note": "mock exploit chain"}, "sensitive": true}

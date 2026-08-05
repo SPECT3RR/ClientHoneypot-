@@ -28,6 +28,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from verdict_db import VerdictDB              # noqa: E402
 from canary_vault import CanaryVault, PLACEMENTS, KINDS  # noqa: E402
 from interventions import InterventionQueue    # noqa: E402
+import interventions as _interventions         # noqa: E402
 from url_queue import URLQueue                 # noqa: E402
 from swarm import SwarmManager                 # noqa: E402
 import capacity                                # noqa: E402
@@ -36,6 +37,8 @@ from evidence import TriageStore, explain      # noqa: E402
 import third_party                             # noqa: E402
 import threatintel                             # noqa: E402
 import intel_keys                              # noqa: E402
+from audit import AuditLog                     # noqa: E402
+import siem                                    # noqa: E402
 import urllib.request                          # noqa: E402
 
 DECOY_BASE = "http://127.0.0.1:8001"
@@ -50,6 +53,10 @@ VAULT = CanaryVault(DB)
 QUEUE = URLQueue(rate_per_minute=30)
 INTERVENTIONS = InterventionQueue(db=DB)
 TRIAGE = TriageStore(DB)
+AUDIT = AuditLog(DB)
+# Findings ship to a file a Wazuh agent tails. No network
+# dependency, so a manager being down cannot lose a verdict.
+SIEM = siem.SiemExporter(mode='jsonl')
 SUBSTRATE = substrate_mod.load()
 # Headed by default: a human cannot take over a headless browser, so running
 # headless silently makes the intervention queue unable to do its job.
@@ -175,6 +182,7 @@ def alert(kind: str, message: str, detail: dict = None) -> None:
             pass
 
 
+INTERVENTIONS.subscribe(lambda i: _interventions.ship_to_siem(SIEM, i))
 INTERVENTIONS.subscribe(lambda i: alert(
     "intervention",
     f"Bot blocked on {i['url']} — {i['reason']}" if i["status"] == "open"
@@ -221,6 +229,15 @@ def _pending_with_contacts(limit: int = 12) -> list:
         if len(out) >= limit:
             break
     return out
+
+
+def _client(request) -> str:
+    """Caller address for the audit trail. Without auth this is all the
+    identity there is, and saying so is better than pretending otherwise."""
+    try:
+        return request.client.host if request and request.client else None
+    except Exception:
+        return None
 
 
 def _third_party_view(limit: int = 20) -> list:
@@ -274,6 +291,10 @@ async def index(request: Request):
         "intel_providers": sorted(threatintel.PROVIDERS),
         "intel_keys": intel_keys.status(),
         "intel_status": threatintel.Enricher(DB, INTEL_KEYS).status(),
+        "audit": AUDIT.recent(25),
+        "audit_stats": AUDIT.stats(),
+        "siem_status": SIEM.status(),
+        "wazuh_config": siem.wazuh_agent_config(),
         "third_party": _third_party_view(20),
         "alerts": ALERTS[:40],
         "placements": PLACEMENTS,
@@ -284,8 +305,10 @@ async def index(request: Request):
 # ── swarm control ──────────────────────────────────────────────────────────
 
 @app.post("/swarm/target")
-async def set_target(bots: int = Form(...)):
+async def set_target(request: Request, bots: int = Form(...)):
     SWARM.set_target(bots)
+    AUDIT.record("swarm.target", source=_client(request),
+                 requested=bots, allowed=SWARM.target)
     if SWARM.capacity_reason:
         alert("capacity", SWARM.capacity_reason)
     else:
@@ -305,14 +328,15 @@ async def set_headless(mode: str = Form(...)):
 
 
 @app.post("/swarm/kill")
-async def kill_swarm():
+async def kill_swarm(request: Request):
     SWARM.kill()
+    AUDIT.record("swarm.kill", source=_client(request))
     alert("swarm", "Kill switch engaged — all workers stopping")
     return RedirectResponse("/", status_code=303)
 
 
 @app.post("/queue/add")
-async def add_urls(urls: str = Form(...)):
+async def add_urls(request: Request, urls: str = Form(...)):
     added = 0
     for line in urls.splitlines():
         line = line.strip()
@@ -321,11 +345,12 @@ async def add_urls(urls: str = Form(...)):
             QUEUE.add(line, source="dashboard")
             added += len(QUEUE) - before
     alert("queue", f"{added} URL(s) queued ({len(QUEUE)} pending)")
+    AUDIT.record("queue.add", source=_client(request), added=added, pending=len(QUEUE))
     return RedirectResponse("/", status_code=303)
 
 
 @app.post("/queue/upload")
-async def upload_urls(file: UploadFile = File(...)):
+async def upload_urls(request: Request, file: UploadFile = File(...)):
     """Take a URL list off a file rather than the clipboard.
 
     Accepts .txt (one per line), .csv (a url column or first field), and
@@ -357,7 +382,8 @@ async def upload_urls(file: UploadFile = File(...)):
 # ── triage ─────────────────────────────────────────────────────────────────
 
 @app.post("/triage/{decision}")
-async def triage(decision: str, url: str = Form(...), note: str = Form(None)):
+async def triage(request: Request, decision: str, url: str = Form(...),
+                 note: str = Form(None)):
     """The operator's ruling on a surfaced finding.
 
     Confirmed goes to the malicious database. Rejected clears the verdict so
@@ -371,6 +397,15 @@ async def triage(decision: str, url: str = Form(...), note: str = Form(None)):
         verb = ("confirmed malicious" if decision == "confirmed"
                 else "marked false positive and cleared")
         alert("triage", f"{url} — {verb}")
+        # This ruling changes recorded truth, so it is the single most
+        # important thing in the audit log.
+        AUDIT.record(f"triage.{'confirm' if decision == 'confirmed' else 'reject'}",
+                     target=url, source=_client(request), note=note)
+        row = DB.lookup(url)
+        if decision == "confirmed" and row:
+            SIEM.verdict(url, row["verdict"], row["score"],
+                         clusters=row.get("clusters"),
+                         findings=row.get("findings"))
     return RedirectResponse("/", status_code=303)
 
 
@@ -384,7 +419,7 @@ async def api_evidence(url: str):
 # ── threat intel ───────────────────────────────────────────────────────────
 
 @app.post("/intel/key")
-async def set_intel_key(provider: str = Form(...), key: str = Form(...)):
+async def set_intel_key(request: Request, provider: str = Form(...), key: str = Form(...)):
     """Store a feed API key for this session.
 
     Kept in memory only — a key pasted into a dashboard should not end up in
@@ -403,6 +438,8 @@ async def set_intel_key(provider: str = Form(...), key: str = Form(...)):
     INTEL_KEYS.clear()
     INTEL_KEYS.update(intel_keys.expand(intel_keys.load()))
     active = threatintel.Enricher(DB, INTEL_KEYS).active()
+    # The provider is recorded; the key never is.
+    AUDIT.record("intel.key.set", target=provider, source=_client(request))
     alert("intel", f"{provider} key stored (one-time) — active: "
                    f"{', '.join(active) or 'none'}")
     return RedirectResponse("/", status_code=303)
@@ -514,10 +551,11 @@ async def resolve_intervention(iid: int, action: str):
 # ── canary vault ───────────────────────────────────────────────────────────
 
 @app.post("/canary/add")
-async def add_canary(kind: str = Form(...), value: str = Form(...),
+async def add_canary(request: Request, kind: str = Form(...), value: str = Form(...),
                      placement: str = Form(...), label: str = Form(None)):
     try:
         VAULT.add(kind, value.strip(), placement, label=label)
+        AUDIT.record("canary.add", target=label, source=_client(request), kind=kind, placement=placement, label=label)
         alert("canary", f"Token '{label or kind}' registered for {placement}")
     except ValueError as e:
         alert("error", str(e))

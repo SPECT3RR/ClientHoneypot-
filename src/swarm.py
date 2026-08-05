@@ -34,6 +34,7 @@ import substrate as substrate_mod
 import third_party
 import threatintel
 import intel_keys
+import siem as siem_mod
 
 
 class WorkerState:
@@ -87,6 +88,10 @@ class SwarmManager:
         self.intel_keys = intel_keys.expand(intel_keys.load())
         self.auto_enrich = bool(self.intel_keys)
         self.enrich_budget = 8      # per session; free quotas are small
+        # Findings go to the SIEM as they happen. A hunt that finds something
+        # at 3am is worth nothing if nobody is told until someone opens the
+        # dashboard.
+        self.siem = siem_mod.SiemExporter(mode="jsonl")
 
         # Self-seed the vault so swarm sessions plant *tracked* bait. Without
         # this the seeder still writes synthetic credentials, but nothing is
@@ -408,6 +413,21 @@ class SwarmManager:
                 state.status = "done"
             self._post_session(state, entry.url)
             self.completed += 1
+            try:
+                self.siem.verdict(entry.url, state.verdict or "unknown",
+                                  state.score,
+                                  clusters=scorer.clusters,
+                                  findings=[f["label"] for f in
+                                            scorer.summary()["findings"]],
+                                  session_id=state.session_id)
+                for act in compromise.actions:
+                    self.siem.compromise(act["kind"], act["severity"],
+                                         url=entry.url,
+                                         session_id=state.session_id,
+                                         detail=act.get("detail"))
+            except Exception:
+                pass    # a SIEM problem must never lose a hunt
+
             tag = (f"{state.kind}" if state.kind == "anchor"
                    else f"child d{state.depth} via {state.trigger} "
                         f"of #{state.parent_worker}")
@@ -437,6 +457,13 @@ class SwarmManager:
                     print(f"    [intel] {entry['host']} -> "
                           f"{verdict['verdict'].upper()} per "
                           f"{', '.join(verdict['flagged_by'])}")
+                    try:
+                        self.siem.intel_flagged(entry["host"],
+                                                verdict["verdict"],
+                                                verdict["flagged_by"],
+                                                parent_url=url)
+                    except Exception:
+                        pass
         except Exception:
             pass
 

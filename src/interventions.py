@@ -156,3 +156,18 @@ class InterventionQueue:
             counts[i.status] = counts.get(i.status, 0) + 1
         return {"open": counts.get("open", 0), "total": len(self._items),
                 "by_status": counts}
+
+
+def ship_to_siem(exporter, item: dict) -> None:
+    """Bridge a raised intervention to the SIEM.
+
+    A bot parked at 3am waiting for a human is an operational alert, not just
+    a dashboard row.
+    """
+    if not exporter or item.get("status") != "open":
+        return
+    try:
+        exporter.intervention(item.get("url"), item.get("reason"),
+                              session_id=item.get("session_id"))
+    except Exception:
+        pass
