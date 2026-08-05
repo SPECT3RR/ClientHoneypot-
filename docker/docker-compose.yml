@@ -13,20 +13,41 @@
 # deliberate, separate act (see README: use a tunnel that terminates outside
 # your perimeter), never a side effect of `docker compose up`.
 
+# !! THE DECOYS ARE NOT STARTED FROM THIS FILE. !!
+#
+#     python scripts/deploy_decoy.py
+#
+# They are declared here to build and tag their images, and nothing more. Two
+# reasons, both learned the hard way:
+#
+# 1. This file used to declare `internal: true` on a decoy_net that already
+#    existed, created by hand. Docker does not retrofit that onto an existing
+#    network, so the flag sat here reading as containment while the decoy had
+#    full egress to the internet and the host. A declaration compose will not
+#    enforce is worse than no declaration. deploy_decoy.py builds the network
+#    to spec and then attacks it from the inside to prove it.
+#
+# 2. The decoys take their config by `docker cp` rather than a mount, because
+#    a mount is visible in /proc/mounts and ours announced that the host was a
+#    Windows machine with the operator's D: drive attached. Compose has no way
+#    to place a file without mounting it.
+#
+# Consequence worth knowing: an internal network cannot publish ports either,
+# so the decoys are reachable only from decoy_net, which is where hunted
+# sessions live. There is no host-side door. Exposing a decoy to real traffic
+# is a separate, deliberate act via a tunnel that terminates outside your
+# perimeter.
+
 services:
 
   # Web decoy: the human who used a leaked portal credential lands here.
+  # Built here, deployed by scripts/deploy_decoy.py.
   decoy:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    entrypoint: ["python", "decoy_app/app.py"]
-    networks: [decoy_net]
-    ports:
-      - "127.0.0.1:8001:8001"
-    volumes:
-      - ../telemetry:/app/telemetry
-    restart: unless-stopped
+    image: clienthoneypot/hunter:latest
+    profiles: ["manual"]          # never started by `up`
 
   # Service decoy: the attacker who exfiltrated our SSH key, DB password or
   # FTP login lands here — and the login WORKS, because the config is
@@ -34,28 +55,13 @@ services:
   #
   # Without this the bait has a dead end: connection refused teaches the
   # attacker the credentials are stale and they never return.
+  # Built here, deployed by scripts/deploy_decoy.py.
   decoy-services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.honeypots
     image: clienthoneypot/decoy-services:latest
-    networks: [decoy_net]
-    volumes:
-      - ../telemetry/honeypots:/var/log/honeypots
-      - ../config/honeypots:/etc/honeypots:ro
-    # Bound to loopback only. Exposing these to the internet is a separate,
-    # deliberate act via a tunnel that terminates outside your perimeter.
-    ports:
-      - "127.0.0.1:2222:22"
-      - "127.0.0.1:2121:21"
-      - "127.0.0.1:33060:3306"
-      - "127.0.0.1:54320:5432"
-      - "127.0.0.1:4445:445"
-      - "127.0.0.1:5901:5900"
-      - "127.0.0.1:33890:3389"
-      - "127.0.0.1:63790:6379"
-      - "127.0.0.1:2323:23"
-    restart: unless-stopped
+    profiles: ["manual"]          # never started by `up`
 
   dashboard:
     build:
@@ -68,7 +74,8 @@ services:
     volumes:
       - ../telemetry:/app/telemetry
       - ../reports:/app/reports
-    depends_on: [decoy]
+    # No depends_on: the decoys are deployed by scripts/deploy_decoy.py, and
+    # the dashboard is useful without them.
     restart: unless-stopped
 
   # Hunting workers are launched per session by src/substrate.py rather than

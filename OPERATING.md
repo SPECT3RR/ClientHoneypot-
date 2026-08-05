@@ -218,10 +218,44 @@ placement:
 answers, a stolen SSH key hits connection-refused and the attacker learns
 nothing landed.
 
-Start the service decoy:
+Start both decoys — contained, disguised, and verified:
 
 ```bash
-docker run -d --name decoy_svc -v "$PWD/config/honeypots:/etc/honeypots:ro" -v "$PWD/telemetry/honeypots:/var/log/honeypots" -p 127.0.0.1:2222:22 -p 127.0.0.1:2121:21 clienthoneypot/decoy-services:latest --setup ssh,ftp
+python scripts/deploy_decoy.py
+```
+
+Never start them with a bare `docker run`. The command that used to be printed
+here mounted `config/honeypots` and `telemetry/honeypots` into the container,
+and those mounts were visible to anyone who landed a shell:
+
+```
+D:\134 /var/log/honeypots 9p rw,...,aname=drvfs;path=D:\
+```
+
+That single line tells an attacker the host is a Windows workstation running
+Docker Desktop with the operator's own drive attached, and it gave them a
+writable path onto that drive. The decoys take their config by `docker cp` now
+and log to stdout instead.
+
+### Telemetry to Wazuh
+
+Nothing is installed in the decoy. It logs to stdout, Docker's log driver
+captures that in the daemon **on the host**, and a collector on the host reads
+the stream and writes findings for a Wazuh agent to tail:
+
+```bash
+python src/decoy_telemetry.py
+```
+
+From inside the decoy there is no process, no port, no outbound connection, no
+mount and no config revealing that it is watched — collection happens on the
+far side of the container's namespaces. See `src/decoy_telemetry.py` for why
+putting an agent in the decoy is the wrong answer.
+
+Check containment and disguise at any time:
+
+```bash
+python scripts/deploy_decoy.py --verify
 ```
 
 ---

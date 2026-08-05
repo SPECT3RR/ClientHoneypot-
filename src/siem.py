@@ -37,15 +37,21 @@ VERSION = "1.0"
 # because it proves bait travelled to attacker infrastructure and came back.
 EVENTS = {
     "canary.fired":          (13, "Canary token used from attacker infrastructure"),
+    "decoy.planted_cred":    (13, "Planted credential used against a decoy service"),
     "decoy.human_operator":  (12, "Human operator classified inside the decoy"),
     "compromise.critical":   (11, "Critical action of compromise observed"),
+    "decoy.command":         (11, "Command executed inside a decoy service"),
     "verdict.malicious":     (10, "URL judged malicious"),
     "decoy.honeytoken_read": (10, "Honeytoken accessed in the decoy"),
+    "decoy.login_success":   (11, "Login succeeded against a decoy service"),
+    "decoy.login_failed":     (8, "Login attempted against a decoy service"),
     "compromise.high":        (8, "Action of compromise observed"),
     "verdict.suspicious":     (7, "URL judged suspicious"),
     "intel.flagged":          (7, "Third-party host flagged by threat feeds"),
+    "decoy.silent":           (6, "Decoy stopped reporting while running"),
     "intervention.raised":    (5, "Bot blocked, operator needed"),
     "session.refused":        (5, "Target refused by the containment gate"),
+    "decoy.connect":          (4, "Connection to a decoy service"),
     "verdict.clean":          (3, "URL judged clean"),
     "verdict.unreachable":    (3, "Target could not be reached"),
 }
@@ -54,10 +60,31 @@ EVENTS = {
 # internal vocabulary.
 TECHNIQUE = {
     "canary.fired": "T1078",             # Valid Accounts
+    "decoy.planted_cred": "T1078",       # Valid Accounts
     "compromise.critical": "T1203",      # Exploitation for Client Execution
     "compromise.high": "T1189",          # Drive-by Compromise
     "verdict.malicious": "T1189",
     "decoy.honeytoken_read": "T1005",    # Data from Local System
+    "decoy.command": "T1059",            # Command and Scripting Interpreter
+    "decoy.login_failed": "T1110",       # Brute Force
+    "decoy.connect": "T1046",            # Network Service Discovery
+}
+
+
+# Verbs a client library emits on its own to set up a session. They carry no
+# intent -- an ordinary ftplib login produces TYPE and PASV without the person
+# driving it ever asking for them, and USER/PASS are the login handshake that
+# the login record already reports in full. Shipping these as decoy.command
+# pages someone at level 11 for a protocol negotiation, which is precisely how
+# a SIEM rule earns itself a mute. The raw lines stay in the docker log for
+# forensics; only the commands a person chose to run are findings.
+#
+# Free-form shell input from the SSH and telnet decoys never matches this set,
+# so an attacker typing `cat /etc/shadow` is always a finding.
+PROTOCOL_CHATTER = {
+    "USER", "PASS", "TYPE", "PASV", "EPSV", "PORT", "EPRT", "SYST", "FEAT",
+    "OPTS", "NOOP", "QUIT", "ABOR", "STAT", "REST", "MODE", "STRU", "ACCT",
+    "AUTH", "PBSZ", "PROT", "CCC", "HELP", "PWD", "XPWD",
 }
 
 
@@ -221,6 +248,60 @@ class SiemExporter:
     def honeytoken(self, filename, session_id, src_ip=None, actor=None):
         return self.emit("decoy.honeytoken_read", filename=filename,
                          session_id=session_id, src_ip=src_ip, actor=actor)
+
+    def decoy_activity(self, record: dict, planted: dict = None):
+        """One observation from a decoy service, collected out of band.
+
+        `planted` is set when the credential used is one we seeded ourselves,
+        which upgrades a brute-force attempt into proof that our bait was
+        exfiltrated and tried. That is the whole point of the decoy, so it
+        ships at the same level as a fired canary.
+        """
+        common = {
+            "service": record.get("server"),
+            "src_ip": record.get("src_ip"),
+            "src_port": record.get("src_port"),
+            "dest_port": record.get("dest_port"),
+            "action": record.get("action"),
+        }
+        action = str(record.get("action") or "").lower()
+
+        if planted:
+            return self.emit("decoy.planted_cred", username=record.get("username"),
+                             token=planted.get("token_id"),
+                             token_kind=planted.get("kind"),
+                             session_id=planted.get("session_id"), **common)
+
+        if action == "login" or record.get("password"):
+            # The password itself is evidence: an attacker's reused password is
+            # intelligence and it is ours to keep. Success matters far more
+            # than an attempt — it means they are now inside and acting.
+            succeeded = str(record.get("status") or "").lower() == "success"
+            return self.emit(
+                "decoy.login_success" if succeeded else "decoy.login_failed",
+                username=record.get("username"),
+                password=record.get("password"), **common)
+
+        if action in ("command", "query"):
+            data = record.get("data")
+            if isinstance(data, dict):
+                cmd = str(data.get("cmd") or "")
+                if cmd.upper() in PROTOCOL_CHATTER:
+                    return None
+                text = f"{cmd} {data.get('args') or ''}".strip()
+            else:
+                text = str(data or "")
+            return self.emit("decoy.command", command=text[:500], **common)
+
+        return self.emit("decoy.connect", **common)
+
+    def decoy_silent(self, container, reason):
+        """The log stream stopped while the container was meant to be running.
+
+        Worth an alert on its own: an attacker who kills the honeypot process
+        to stop being watched produces exactly this and nothing else.
+        """
+        return self.emit("decoy.silent", container=container, reason=reason)
 
     def intel_flagged(self, host, verdict, providers, parent_url=None):
         return self.emit("intel.flagged", host=host, verdict=verdict,

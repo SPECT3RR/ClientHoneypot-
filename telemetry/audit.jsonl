@@ -21,3 +21,24 @@
 {"ts": 1785954227.400233, "actor": "operator", "source": "testclient", "action": "queue.add", "target": null, "detail": {"added": 1, "pending": 2}, "sensitive": false}
 {"ts": 1785954227.4133384, "actor": "operator", "source": "testclient", "action": "swarm.target", "target": null, "detail": {"requested": 0, "allowed": 0}, "sensitive": false}
 {"ts": 1785954227.48323, "actor": "operator", "source": "testclient", "action": "intel.key.set", "target": "virustotal", "detail": {}, "sensitive": true}
+{"ts": 1785955378.2809205, "actor": "operator", "source": "testclient", "action": "queue.add", "target": null, "detail": {"added": 1, "pending": 1}, "sensitive": false}
+{"ts": 1785955378.2932155, "actor": "operator", "source": "testclient", "action": "swarm.target", "target": null, "detail": {"requested": 0, "allowed": 0}, "sensitive": false}
+{"ts": 1785955378.3035822, "actor": "operator", "source": "testclient", "action": "swarm.kill", "target": null, "detail": {}, "sensitive": true}
+{"ts": 1785955378.317912, "actor": "operator", "source": "testclient", "action": "canary.add", "target": "t", "detail": {"kind": "url_token", "placement": "browser_profile", "label": "t"}, "sensitive": false}
+{"ts": 1785955378.3295882, "actor": "operator", "source": "testclient", "action": "queue.add", "target": null, "detail": {"added": 1, "pending": 2}, "sensitive": false}
+{"ts": 1785955378.340672, "actor": "operator", "source": "testclient", "action": "swarm.target", "target": null, "detail": {"requested": 0, "allowed": 0}, "sensitive": false}
+{"ts": 1785955378.4070094, "actor": "operator", "source": "testclient", "action": "intel.key.set", "target": "virustotal", "detail": {}, "sensitive": true}
+{"ts": 1785956631.7234433, "actor": "operator", "source": "testclient", "action": "queue.add", "target": null, "detail": {"added": 1, "pending": 1}, "sensitive": false}
+{"ts": 1785956631.7362285, "actor": "operator", "source": "testclient", "action": "swarm.target", "target": null, "detail": {"requested": 0, "allowed": 0}, "sensitive": false}
+{"ts": 1785956631.7496514, "actor": "operator", "source": "testclient", "action": "swarm.kill", "target": null, "detail": {}, "sensitive": true}
+{"ts": 1785956631.7632031, "actor": "operator", "source": "testclient", "action": "canary.add", "target": "t", "detail": {"kind": "url_token", "placement": "browser_profile", "label": "t"}, "sensitive": false}
+{"ts": 1785956631.7751153, "actor": "operator", "source": "testclient", "action": "queue.add", "target": null, "detail": {"added": 1, "pending": 2}, "sensitive": false}
+{"ts": 1785956631.787296, "actor": "operator", "source": "testclient", "action": "swarm.target", "target": null, "detail": {"requested": 0, "allowed": 0}, "sensitive": false}
+{"ts": 1785956631.8577626, "actor": "operator", "source": "testclient", "action": "intel.key.set", "target": "virustotal", "detail": {}, "sensitive": true}
+{"ts": 1785956804.2257783, "actor": "operator", "source": "testclient", "action": "queue.add", "target": null, "detail": {"added": 1, "pending": 1}, "sensitive": false}
+{"ts": 1785956804.2378147, "actor": "operator", "source": "testclient", "action": "swarm.target", "target": null, "detail": {"requested": 0, "allowed": 0}, "sensitive": false}
+{"ts": 1785956804.2515697, "actor": "operator", "source": "testclient", "action": "swarm.kill", "target": null, "detail": {}, "sensitive": true}
+{"ts": 1785956804.2651365, "actor": "operator", "source": "testclient", "action": "canary.add", "target": "t", "detail": {"kind": "url_token", "placement": "browser_profile", "label": "t"}, "sensitive": false}
+{"ts": 1785956804.271654, "actor": "operator", "source": "testclient", "action": "queue.add", "target": null, "detail": {"added": 1, "pending": 2}, "sensitive": false}
+{"ts": 1785956804.2831347, "actor": "operator", "source": "testclient", "action": "swarm.target", "target": null, "detail": {"requested": 0, "allowed": 0}, "sensitive": false}
+{"ts": 1785956804.3475847, "actor": "operator", "source": "testclient", "action": "intel.key.set", "target": "virustotal", "detail": {}, "sensitive": true}

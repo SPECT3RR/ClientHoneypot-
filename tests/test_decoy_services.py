@@ -66,8 +66,23 @@ def test_config_writes_valid_json(vault, tmp_path):
     path = tmp_path / "config.json"
     ds.write_config(vault, path)
     loaded = json.loads(path.read_text())
-    assert loaded["logs"] == "file,json"
+    # stdout, not a file: a log file needs a mount, and a mount is visible in
+    # /proc/mounts to an attacker who lands a shell in the decoy.
+    assert loaded["logs"] == "terminal,json"
     assert "ssh" in loaded["honeypots"]
+
+
+def test_a_captured_command_keeps_who_ran_it():
+    """qeeqbox puts the command in "data" alongside the fields identifying the
+    source. Unwrapping "data" as an envelope dropped src_ip and server, and
+    everything an attacker typed at the SSH decoy was discarded for want of a
+    source address."""
+    rec = ds.parse_log_line(
+        '{"action": "command", "server": "ssh_server", "src_ip": "1.2.3.4", '
+        '"data": {"cmd": "cat /etc/shadow"}}')
+    assert rec["src_ip"] == "1.2.3.4"
+    assert rec["server"] == "ssh_server"
+    assert rec["data"]["cmd"] == "cat /etc/shadow"
 
 
 # ── log ingestion ──────────────────────────────────────────────────────────

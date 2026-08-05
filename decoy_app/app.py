@@ -101,6 +101,27 @@ def _log_access(request: Request, event_type: str, data: dict):
     t.log(event_type, data)
     t.close()
 
+    # And to stdout, which is what actually leaves this container.
+    #
+    # The database write above lands on the container's own writable layer and
+    # goes away with it: there is deliberately no mount here any more. A mount
+    # is visible in /proc/mounts, and ours announced that the host was a
+    # Windows machine with the operator's D: drive attached -- and gave an
+    # attacker in here somewhere on that drive to write.
+    #
+    # Docker's log driver captures stdout in the daemon, on the far side of
+    # this container's namespaces, and src/decoy_telemetry.py collects it from
+    # the host. See that module for why there is no agent in here.
+    print(json.dumps({
+        "server": "web_decoy",
+        "action": event_type,
+        "src_ip": request.client.host if request.client else None,
+        "session_id": session_id,
+        "path": str(request.url.path),
+        "user_agent": request.headers.get("user-agent"),
+        "detail": data,
+    }, default=str), flush=True)
+
 
 @app.get("/c/{token_id}")
 async def canary_callback(request: Request, token_id: str):
@@ -110,26 +131,20 @@ async def canary_callback(request: Request, token_id: str):
     after the session ended and from attacker infrastructure rather than the
     site we visited — which is exactly why the token carries its origin
     session. Responds innocuously so the caller learns nothing.
+
+    The hit is REPORTED here and resolved on the host, not looked up here.
+    This container has no canary vault: it holds no list of our tokens, so an
+    attacker who compromises the decoy cannot enumerate the bait or work out
+    which of it has already fired. It also means the report does not depend on
+    the token being recognised — an unknown token id is itself worth knowing
+    about, and the previous version, which logged only on a successful local
+    lookup, would silently drop the most valuable event the platform produces
+    the moment the decoy could not reach the database.
     """
-    from canary_vault import CanaryVault  # noqa: E402
-    from verdict_db import VerdictDB      # noqa: E402
-
-    db = VerdictDB()
-    hit = CanaryVault(db).record_hit(
-        token_id,
-        src_ip=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
-        detail={"path": str(request.url.path),
-                "referer": request.headers.get("referer")},
-    )
-    db.close()
-
-    if hit:
-        origin = hit.get("origin_session") or "unattributed"
-        print(f"[CANARY] {hit['kind']} '{hit['label']}' fired from "
-              f"{hit['src_ip']} -- planted in session {origin}")
-        _log_access(request, "canary_hit", hit)
-
+    _log_access(request, "canary_hit", {
+        "token_id": token_id,
+        "referer": request.headers.get("referer"),
+    })
     return PlainTextResponse("", status_code=204)
 
 

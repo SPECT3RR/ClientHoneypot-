@@ -63,7 +63,18 @@ def build_config(vault, services: list = None,
     better than a port that does not, and silence is itself a signal.
     """
     services = services or list(DEFAULT_SERVICES)
-    tokens = vault.for_placement("decoy_services") if vault else []
+
+    # Every decoy_services token, INCLUDING burned ones. for_placement()
+    # filters burned tokens out, which is right for a single-use URL beacon
+    # and wrong here: burning happens the moment the attacker first uses the
+    # credential, so filtering means the login that just worked is refused
+    # the next time they come back. That teaches them the credential was
+    # revoked -- they were detected -- which is the exact conclusion this
+    # module exists to prevent. A service credential must keep working. The
+    # repeat logins are the best telemetry we get: they show persistence,
+    # tooling, and which hours the operator keeps.
+    tokens = ([t for t in vault.all() if t.get("placement") == "decoy_services"]
+              if vault else [])
 
     # Map service -> the token whose kind belongs on it.
     by_service = {}
@@ -88,8 +99,12 @@ def build_config(vault, services: list = None,
             entry["password"] = "Asteria!2026"
         honeypots[svc] = entry
 
+    # "terminal" means stdout, which Docker's log driver captures in the
+    # daemon on the host. That is deliberate and it is the whole disguise:
+    # writing to a file needs a mount, and a mount is visible in
+    # /proc/mounts to anyone who lands a shell here. See decoy_telemetry.
     return {
-        "logs": "file,json",
+        "logs": "terminal,json",
         "logs_location": log_dir,
         "honeypots": honeypots,
     }
@@ -142,7 +157,22 @@ def parse_log_line(line: str) -> dict:
 
     if not isinstance(record, dict):
         return None
-    return record.get("data", record) if "data" in record else record
+
+    # "data" is overloaded. Some records wrap the whole payload in it; but a
+    # captured command puts the command ITSELF there, alongside the fields
+    # that say who ran it:
+    #
+    #   {"action": "command", "src_ip": "...", "data": {"cmd": "LIST"}}
+    #
+    # Unwrapping that unconditionally threw away src_ip and server and left a
+    # bare {"cmd": ...}, which then failed every "is this real activity?"
+    # check for want of a source address -- so captured commands, including
+    # everything an attacker typed at the SSH decoy, were silently dropped.
+    # Only unwrap when there is no record around the payload.
+    inner = record.get("data")
+    if isinstance(inner, dict) and not (record.get("action") or record.get("server")):
+        return inner
+    return record
 
 
 def is_credential_attempt(record: dict) -> bool:
