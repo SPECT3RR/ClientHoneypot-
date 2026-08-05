@@ -5,6 +5,7 @@ and acts as a pure Telemetry Collector, forwarding all observables to the Event 
 """
 import asyncio
 import json
+import os
 from pathlib import Path
 
 from playwright.async_api import async_playwright
@@ -17,6 +18,11 @@ from cleanup import wipe_temp_profile
 from event_bus import EventBus, Event, EventCategory
 
 SCREENSHOT_DIR = Path(__file__).parent.parent / "screenshots"
+
+
+def _in_container() -> bool:
+    """True when this session is already running inside a hunting container."""
+    return os.environ.get("CH_SUBSTRATE") == "docker" or Path("/.dockerenv").exists()
 
 from ownership_manager import OwnershipManager
 
@@ -61,11 +67,25 @@ class BrowserSession:
         self._bait_script = seeder.init_script(seeder.tokens)
         self._bait_cookies = seeder.cookies(seeder.tokens)
         
+        args = ["--disable-blink-features=AutomationControlled", "--test-type",
+                "--disable-infobars", "--disable-popup-blocking"]
+        # Stripping --no-sandbox hides the automation tell on a normal desktop,
+        # but inside the hunting container it kills Chromium outright: with
+        # --cap-drop ALL and a non-root user its setuid sandbox cannot
+        # initialise, and launch fails with TargetClosedError. The container
+        # and the WSL2 VM around it are the real boundary there, so the inner
+        # sandbox is the right thing to give up — but only when contained.
+        ignore = ["--enable-automation"]
+        if _in_container():
+            args.append("--no-sandbox")
+        else:
+            ignore.append("--no-sandbox")
+
         self._context = await self._pw.chromium.launch_persistent_context(
             user_data_dir=str(user_data_dir),
             headless=self.headless,
-            args=["--disable-blink-features=AutomationControlled", "--test-type", "--disable-infobars", "--disable-popup-blocking"],
-            ignore_default_args=["--enable-automation", "--no-sandbox"],
+            args=args,
+            ignore_default_args=ignore,
             user_agent=self.persona.get("user_agent", "Mozilla/5.0"),
             viewport=self.persona.get("screen", {"width": 1920, "height": 1080}),
             locale=self.persona.get("locale", "en-US"),
