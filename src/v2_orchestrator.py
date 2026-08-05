@@ -1,4 +1,5 @@
 import asyncio
+import os
 import sys
 from pathlib import Path
 import argparse
@@ -22,6 +23,34 @@ from decoy_controller import DecoyController
 from reliability_layer import ReliabilityLayer
 from session_timeline import SessionTimelineRecorder
 from browser_controller import BrowserSession
+
+def _drop_result(url, verdict, scorer, decision, detector) -> None:
+    """Write the session result to CH_RESULT_DIR for the host to ingest.
+
+    No-op outside a hardened container run, where the session writes to the
+    verdict database directly.
+    """
+    result_dir = os.environ.get("CH_RESULT_DIR")
+    if not result_dir:
+        return
+    import hashlib
+    import json as _json
+    try:
+        path = Path(result_dir)
+        path.mkdir(parents=True, exist_ok=True)
+        stamp = hashlib.sha1(url.encode()).hexdigest()[:12]
+        (path / f"{stamp}.json").write_text(_json.dumps({
+            "url": url,
+            "verdict": verdict,
+            "score": scorer.score,
+            "clusters": scorer.clusters,
+            "findings": [f["label"] for f in scorer.summary()["findings"]],
+            "decision": decision,
+            "actions": detector.summary(),
+        }, default=str, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+
 
 async def run_v2_session(target_url: str, headless: bool = True,
                          budget_seconds: float = 150.0):
@@ -154,6 +183,12 @@ async def run_v2_session(target_url: str, headless: bool = True,
                 findings=[f["label"] for f in threat_scorer.summary()["findings"]],
                 decision=decision_policy.current_state,
             )
+            # Drop the result where the host can ingest it. Under the hardened
+            # substrate this is the container's ONLY writable host path — it
+            # cannot reach verdicts.db itself.
+            _drop_result(target_url, verdict, threat_scorer,
+                         decision_policy.current_state, compromise_detector)
+
             actions = compromise_detector.summary()
             print(f"[+] Verdict   : {verdict.upper()} (score {threat_scorer.score})")
             print(f"[+] Clusters  : {threat_scorer.clusters or 'none'}")

@@ -294,5 +294,14 @@ async def visitors():
 
 
 if __name__ == "__main__":
+    import os
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8001)
+
+    # Loopback by default so a host run is never exposed to the LAN. In a
+    # container 127.0.0.1 is the container's own loopback, so a published port
+    # maps to nothing — bind the interface there instead. The port is still
+    # published to 127.0.0.1 on the host, so the exposure boundary is unchanged.
+    in_container = (os.environ.get("CH_SUBSTRATE") == "docker"
+                    or Path("/.dockerenv").exists())
+    host = os.environ.get("CH_BIND", "0.0.0.0" if in_container else "127.0.0.1")
+    uvicorn.run(app, host=host, port=8001)

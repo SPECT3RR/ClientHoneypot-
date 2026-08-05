@@ -138,10 +138,13 @@ def test_env_override_does_not_leak_when_unset(monkeypatch):
     assert sub.load().allows_live_targets is False
 
 
-def test_decoy_base_is_reachable_from_inside_a_container():
-    # Loopback inside the container is the container, not the host.
+def test_decoy_is_reached_by_container_dns_not_via_the_host():
+    """host.docker.internal gave a hunted page a route to every port
+    listening on Windows -- the dashboard included -- which the container
+    hardening does nothing about."""
     s = sub.DockerSubstrate()
-    assert "host.docker.internal" in s.decoy_base
+    assert "host.docker.internal" not in s.decoy_base
+    assert s.decoy_base.startswith("http://decoy:")
 
 
 def test_container_run_command_carries_the_hardening(monkeypatch):
@@ -167,12 +170,44 @@ def test_container_run_command_carries_the_hardening(monkeypatch):
     assert "--rm" in cmd                              # disposable
     assert "no-new-privileges:true" in cmd            # no privilege gain
     assert "--cap-drop ALL" in cmd
-    assert "--network hunt_net" in cmd                # not the host network
+    assert "--network hunt_net" in cmd                # egress
+    assert "--network decoy_net" in cmd               # decoy by DNS, internal
     assert "--shm-size 1g" in cmd                     # Chromium OOMs on 64 MB
     assert "--pids-limit" in cmd and "--memory" in cmd
     assert "CH_SUBSTRATE=docker" in cmd
-    assert "host.docker.internal:host-gateway" in cmd
+
+    # No route to the host, and no write access to the verdict store.
+    assert "host-gateway" not in cmd
+    assert "/app/telemetry" not in cmd
+    assert "/app/results" in cmd
     assert cmd.rstrip().endswith("https://evil.example/x")
+
+
+def test_a_bad_result_drop_is_discarded_not_trusted(tmp_path, monkeypatch):
+    """The container writes, the host reads. A compromised session can drop a
+    malformed file but must never corrupt the store."""
+    import json
+    from verdict_db import VerdictDB
+
+    s = sub.DockerSubstrate({"result_dir": "drop"})
+    root = tmp_path
+    monkeypatch.setattr(sub, "__file__", str(root / "src" / "substrate.py"))
+    drop = root / "drop"
+    drop.mkdir(parents=True)
+    (drop / "good.json").write_text(json.dumps({
+        "url": "http://real.test/", "score": 70, "clusters": [],
+        "findings": [], "decision": "divert_to_decoy"}), encoding="utf-8")
+    (drop / "bad.json").write_text("{{{ not json", encoding="utf-8")
+    (drop / "nourl.json").write_text('{"score": 9}', encoding="utf-8")
+
+    db = VerdictDB(db_path=tmp_path / "v.db", session_id="host")
+    ingested = s.ingest_results(db)
+
+    assert ingested == ["http://real.test/"]
+    assert db.lookup("http://real.test/")["verdict"] == "malicious"
+    # Every drop is consumed so a bad file cannot be replayed.
+    assert list(drop.glob("*.json")) == []
+    db.close()
 
 
 def test_container_timeout_destroys_the_session(monkeypatch):
@@ -187,3 +222,33 @@ def test_container_timeout_destroys_the_session(monkeypatch):
     # A hung hostile session must not linger; it is killed and reported.
     assert result["ok"] is False
     assert "destroyed" in result["stderr"]
+
+
+def test_docker_desktop_still_injects_a_host_route(monkeypatch):
+    """Measured, not assumed: removing --add-host does NOT remove the route.
+
+    Docker Desktop injects host.docker.internal into every container and
+    proxies it to host loopback services. A hunt container was observed
+    reaching host ports 8000, 8001 and 445 with the flag gone. Reaching them
+    still needs code execution inside the container first, so the layered
+    defence holds — but the substrate must not claim more isolation than it
+    delivers, and closing this needs a host firewall rule.
+    """
+    s = sub.DockerSubstrate()
+    # We no longer pass the flag...
+    captured = {}
+
+    class P: returncode = 0; stdout = ""; stderr = ""
+
+    def fake_run(cmd, **kw):
+        if cmd[:2] == ["docker", "run"]:
+            captured["cmd"] = " ".join(cmd)
+        return P()
+
+    monkeypatch.setattr(sub.subprocess, "run", fake_run)
+    s.run_session("https://evil.example/", "s1")
+    assert "host-gateway" not in captured["cmd"]
+
+    # ...but the substrate does not advertise host isolation it cannot give.
+    assert s.isolated is True          # from the container + WSL2 VM
+    assert "host.docker.internal" not in s.decoy_base
