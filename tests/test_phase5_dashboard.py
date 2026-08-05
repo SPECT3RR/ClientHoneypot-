@@ -120,9 +120,29 @@ def _swarm(tmp_path, target=0):
                         InterventionQueue(), headless=True, target=target), db
 
 
-def test_target_is_settable_and_clamped(tmp_path):
+def test_target_is_clamped_to_what_the_machine_can_run(tmp_path, monkeypatch):
+    """Asking for more bots than fit does not give more throughput; it gives
+    paging and OOM-killed sessions with half-written verdicts."""
+    import capacity
     swarm, db = _swarm(tmp_path)
-    assert swarm.set_target(5) == 5
+
+    monkeypatch.setattr(capacity, "available_mb",
+                        lambda: capacity.RESERVE_MB + 2000)
+    assert swarm.set_target(3) == 3
+    assert swarm.capacity_reason == ""
+
+    monkeypatch.setattr(capacity, "available_mb",
+                        lambda: capacity.RESERVE_MB + 900)
+    # This manager is headless (280 MB/bot), so 900 MB usable fits 3.
+    assert swarm.set_target(15) == 3
+    assert "queued" in swarm.capacity_reason
+    assert swarm.requested_target == 15   # the ask is remembered, not lost
+
+    # Headed costs more, so the same memory fits fewer. Switching mode must
+    # re-clamp, or a headed swarm silently runs over budget.
+    swarm.set_headless(False)
+    assert swarm.set_target(15) == 2
+
     assert swarm.set_target(-3) == 0
     db.close()
 

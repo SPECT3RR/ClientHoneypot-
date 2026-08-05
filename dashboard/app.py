@@ -14,7 +14,11 @@ import json
 import sys
 from pathlib import Path
 
-from fastapi import FastAPI, Request, Form
+import csv
+import io
+import re
+
+from fastapi import FastAPI, Request, Form, UploadFile, File
 from fastapi.responses import HTMLResponse, StreamingResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -26,6 +30,7 @@ from canary_vault import CanaryVault, PLACEMENTS, KINDS  # noqa: E402
 from interventions import InterventionQueue    # noqa: E402
 from url_queue import URLQueue                 # noqa: E402
 from swarm import SwarmManager                 # noqa: E402
+import capacity                                # noqa: E402
 import substrate as substrate_mod              # noqa: E402
 import urllib.request                          # noqa: E402
 
@@ -85,7 +90,69 @@ def system_state(interventions: list, visitors: dict, hits: list) -> str:
     return "IDLE"
 
 ALERTS: list = []
+PAUSED: list = []          # containers the dashboard stopped, so it can restore them
 _subscribers: list = []
+
+URL_RE = re.compile(r"https?://[^\s\"'<>,;]+", re.IGNORECASE)
+
+
+def parse_url_file(raw: str, filename: str = "") -> list:
+    """Pull URLs out of .txt, .csv or .json, preserving order and deduping.
+
+    Deliberately forgiving: a threat feed arrives however it arrives, and a
+    strict parser that rejects the whole file over one bad row is useless.
+    Falls back to a regex sweep so a wrapped or malformed file still yields
+    its URLs rather than nothing.
+    """
+    name = (filename or "").lower()
+    found: list = []
+
+    if name.endswith(".json"):
+        try:
+            data = json.loads(raw)
+            items = data if isinstance(data, list) else data.get("urls", [])
+            for item in items:
+                if isinstance(item, str):
+                    found.append(item)
+                elif isinstance(item, dict) and item.get("url"):
+                    found.append(item["url"])
+        except (ValueError, AttributeError):
+            found = []
+
+    elif name.endswith(".csv") or name.endswith(".tsv"):
+        delim = "\t" if name.endswith(".tsv") else ","
+        try:
+            reader = csv.DictReader(io.StringIO(raw), delimiter=delim)
+            key = next((f for f in (reader.fieldnames or [])
+                        if f and f.strip().lower() in ("url", "uri", "link",
+                                                       "indicator")), None)
+            if key:
+                found = [r[key] for r in reader if r.get(key)]
+        except (csv.Error, ValueError):
+            found = []
+
+    if not found:
+        # .txt, or any of the above that did not parse cleanly.
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            found.append(line)
+
+    cleaned, seen = [], set()
+    for candidate in found:
+        candidate = (candidate or "").strip().strip('"\'')
+        if not candidate:
+            continue
+        if not candidate.lower().startswith(("http://", "https://")):
+            match = URL_RE.search(candidate)
+            candidate = match.group(0) if match else None
+            if not candidate:
+                continue
+        if candidate not in seen:
+            seen.add(candidate)
+            cleaned.append(candidate)
+    return cleaned
 
 
 def alert(kind: str, message: str, detail: dict = None) -> None:
@@ -123,6 +190,9 @@ async def index(request: Request):
         "state": system_state(interventions, visitors, hits),
         "containment": containment(),
         "headless": SWARM.headless,
+        "capacity": capacity.report(SWARM.headless),
+        "foreign": capacity.foreign_containers(),
+        "paused": list(PAUSED),
         "swarm": SWARM.status(),
         "interventions": interventions,
         "visitors": visitors,
@@ -142,7 +212,10 @@ async def index(request: Request):
 @app.post("/swarm/target")
 async def set_target(bots: int = Form(...)):
     SWARM.set_target(bots)
-    alert("swarm", f"Target bot count set to {SWARM.target}")
+    if SWARM.capacity_reason:
+        alert("capacity", SWARM.capacity_reason)
+    else:
+        alert("swarm", f"Target bot count set to {SWARM.target}")
     return RedirectResponse("/", status_code=303)
 
 
@@ -174,6 +247,64 @@ async def add_urls(urls: str = Form(...)):
             QUEUE.add(line, source="dashboard")
             added += len(QUEUE) - before
     alert("queue", f"{added} URL(s) queued ({len(QUEUE)} pending)")
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/queue/upload")
+async def upload_urls(file: UploadFile = File(...)):
+    """Take a URL list off a file rather than the clipboard.
+
+    Accepts .txt (one per line), .csv (a url column or first field), and
+    .json (array of strings or objects with a url key). Anything already
+    queued, already visited, or already judged is skipped — re-hunting a URL
+    you have a verdict for wastes the one resource this machine is short of.
+    """
+    raw = (await file.read()).decode("utf-8", errors="replace")
+    found = parse_url_file(raw, file.filename or "")
+
+    known = {r["url"] for r in DB.recent(limit=100000)}
+    added = skipped = 0
+    for url in found:
+        if url in known:
+            skipped += 1
+            continue
+        before = len(QUEUE)
+        QUEUE.add(url, source=f"upload:{file.filename}")
+        if len(QUEUE) > before:
+            added += 1
+        else:
+            skipped += 1
+
+    alert("queue", f"{file.filename}: {added} queued, {skipped} skipped "
+                   f"(already seen or duplicate) — {len(QUEUE)} pending")
+    return RedirectResponse("/", status_code=303)
+
+
+# ── capacity ───────────────────────────────────────────────────────────────
+
+@app.post("/capacity/pause")
+async def pause_foreign():
+    """Stop other containers to free memory. Preserved, never removed."""
+    names = capacity.foreign_containers()
+    if not names:
+        alert("capacity", "no other containers are running")
+        return RedirectResponse("/", status_code=303)
+    PAUSED.clear()
+    PAUSED.extend(names)
+    result = capacity.pause_containers(names)
+    alert("capacity", f"paused {len(result['stopped'])} container(s) — "
+                      f"{capacity.available_mb()} MB now available")
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/capacity/resume")
+async def resume_foreign():
+    if not PAUSED:
+        alert("capacity", "nothing was paused by the dashboard")
+        return RedirectResponse("/", status_code=303)
+    result = capacity.resume_containers(PAUSED)
+    alert("capacity", f"resumed {len(result['started'])} container(s)")
+    PAUSED.clear()
     return RedirectResponse("/", status_code=303)
 
 

@@ -282,18 +282,74 @@
     </div>
 
     <div class="panel">
-      <h4>Target queue <span class="sub">one URL per line</span></h4>
+      <h4>Target queue <span class="sub">paste, or upload a list</span></h4>
       <form method="post" action="/queue/add">
-        <textarea name="urls" rows="4" style="width:100%"
+        <textarea name="urls" rows="3" style="width:100%"
                   placeholder="http://127.0.0.1:8080/"></textarea>
         <button class="primary" type="submit" style="margin-top:8px">Queue</button>
       </form>
+
+      <form method="post" action="/queue/upload" enctype="multipart/form-data"
+            class="inline" style="margin-top:10px;padding-top:10px;
+                                  border-top:1px solid var(--line)">
+        <div style="flex:1">
+          <label class="f">upload .txt / .csv / .json</label>
+          <input type="file" name="file" accept=".txt,.csv,.tsv,.json,.dat"
+                 style="width:100%">
+        </div>
+        <div style="flex:0 0 auto"><button type="submit">Load file</button></div>
+      </form>
+      <p class="muted" style="font-size:11px;margin:8px 0 0">
+        Already-judged URLs are skipped &mdash; re-hunting something you have a
+        verdict for spends the resource you have least of.
+      </p>
+
       {% if not containment.live_allowed %}
       <p class="muted" style="font-size:11px;margin-top:9px">
         <span class="pill danger">loopback only</span>
         Set <code>runtime.profile: docker</code> in
         <code>config/runtime.yaml</code> to hunt live targets.
       </p>
+      {% endif %}
+    </div>
+
+    <div class="panel {% if capacity.constrained %}alert{% endif %}">
+      <h4>Capacity
+        <span class="sub">{{ capacity.available_mb }} MB available of
+          {{ capacity.total_mb }} MB</span></h4>
+      <div style="margin-bottom:10px">
+        <div class="stat"><b id="c-max">{{ capacity.max_bots }}</b>
+          <span>max headed</span></div>
+        <div class="stat"><b>{{ capacity.max_bots_headless }}</b>
+          <span>max headless</span></div>
+        <div class="stat"><b>{{ capacity.bot_cost_mb }}</b>
+          <span>MB per bot</span></div>
+      </div>
+      {% if swarm.capacity_reason %}
+        <p class="parked" style="font-size:11px;margin:0 0 9px">
+          {{ swarm.capacity_reason }}</p>
+      {% endif %}
+
+      {% if paused %}
+        <form method="post" action="/capacity/resume">
+          <button class="primary" type="submit">
+            Resume {{ paused|length }} paused container(s)</button>
+        </form>
+        <p class="muted" style="font-size:11px;margin-top:7px">
+          Stopped, never removed &mdash; volumes and state intact.
+        </p>
+      {% elif foreign %}
+        <form method="post" action="/capacity/pause">
+          <button type="submit">Pause {{ foreign|length }} other container(s)</button>
+        </form>
+        <p class="muted" style="font-size:11px;margin-top:7px">
+          {{ foreign[:4]|join(', ') }}{% if foreign|length > 4 %}, &hellip;{% endif %}
+          &mdash; stopped, not removed.
+        </p>
+      {% else %}
+        <p class="muted" style="font-size:11px;margin:0">
+          No other containers competing for memory.
+        </p>
       {% endif %}
     </div>
 

@@ -28,6 +28,7 @@ from interventions import detect_block
 from link_crawler import LinkCrawler
 from nav_replay import build_journey
 from canary_vault import default_seed_tokens
+import capacity
 import substrate as substrate_mod
 
 
@@ -78,6 +79,8 @@ class SwarmManager:
                   f"(vault was empty)")
 
         self._target = target
+        self.requested_target = target
+        self.capacity_reason = ""
         self._workers: dict = {}
         self._tasks: dict = {}
         self._next_id = 1
@@ -91,7 +94,16 @@ class SwarmManager:
         return self._target
 
     def set_target(self, n: int) -> int:
-        self._target = max(0, int(n))
+        """Set the target, clamped to what this machine can actually run.
+
+        Exceeding physical memory does not give you more throughput; it gives
+        you paging, stalled Chromium instances, and sessions OOM-killed
+        mid-hunt leaving half-written verdicts. The excess stays queued.
+        """
+        allowed, reason = capacity.clamp(n, headless=self.headless)
+        self.requested_target = max(0, int(n))
+        self._target = allowed
+        self.capacity_reason = reason
         return self._target
 
     def set_headless(self, headless: bool) -> bool:
@@ -119,6 +131,10 @@ class SwarmManager:
             counts[s["status"]] = counts.get(s["status"], 0) + 1
         return {
             "target": self._target,
+            "requested_target": self.requested_target,
+            "capacity_reason": self.capacity_reason,
+            "capacity": capacity.report(self.headless),
+            "headless": self.headless,
             "live": self.live(),
             "parked": counts.get("parked", 0),
             "completed": self.completed,

@@ -12,6 +12,7 @@ but each phase only writes the tables it owns.
 """
 import json
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from urllib.parse import urlparse
@@ -128,12 +129,29 @@ def classify(score: int, had_compromise: bool = False) -> str:
     return "clean"
 
 
+
+def _locked(fn):
+    """Serialise a write. Two threads committing at once is how you get
+    'database is locked' mid-hunt and a half-written verdict."""
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return fn(self, *args, **kwargs)
+    wrapper.__name__ = fn.__name__
+    wrapper.__doc__ = fn.__doc__
+    return wrapper
+
+
 class VerdictDB:
     def __init__(self, db_path: Path = None, session_id: str = "unknown_session"):
         self.path = Path(db_path or DB_PATH)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(self.path)
+        # check_same_thread=False because the dashboard reads this connection
+        # from FastAPI handlers while background work touches it from the
+        # executor; sqlite3's default guard raises ProgrammingError across
+        # threads. The lock below is what actually makes that safe.
+        self.conn = sqlite3.connect(self.path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        self._lock = threading.Lock()
         self.conn.executescript(SCHEMA)
         self.conn.commit()
         self.session_id = session_id
@@ -173,6 +191,7 @@ class VerdictDB:
 
     # ── writes ─────────────────────────────────────────────────────────────
 
+    @_locked
     def record_verdict(self, url: str, score: int, clusters: list,
                        findings: list, decision: str) -> str:
         """Upsert the URL row and append an immutable verdict record."""
@@ -203,6 +222,7 @@ class VerdictDB:
         self.conn.commit()
         return verdict
 
+    @_locked
     def record_compromise(self, url: str, kind: str, severity: str,
                           detail: dict) -> None:
         self.conn.execute(
@@ -213,6 +233,7 @@ class VerdictDB:
              json.dumps(detail, default=str), time.time()))
         self.conn.commit()
 
+    @_locked
     def record_nav(self, from_url: str, to_url: str, trigger: str) -> None:
         self.conn.execute(
             """INSERT INTO nav_graph (session_id, from_url, to_url, trigger, ts)
