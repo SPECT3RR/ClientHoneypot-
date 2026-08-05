@@ -108,11 +108,10 @@ Write-Output ""
 Write-Output "Created $created rule(s) in group '$RuleGroup'."
 Write-Output ""
 Write-Output "Verify from a container:"
-Write-Output '  docker run --rm --network hunt_net --entrypoint python clienthoneypot/hunter:latest -c "import socket
-for p in (445,3389,8000):
-    try:
-        socket.create_connection((''host.docker.internal'',p),timeout=3).close(); print(p,''REACHABLE'')
-    except Exception: print(p,''blocked'')"'
+Write-Output "  docker run --rm --network hunt_net --entrypoint python \"
+Write-Output "    clienthoneypot/hunter:latest -c \"import socket; [print(p, 'REACHABLE' if (lambda: (socket.create_connection(('host.docker.internal',p),timeout=3).close(), True)[1])() else 'blocked') for p in (445,3389,8000)]\""
 Write-Output ""
-Write-Output "This does NOT block the decoy on decoy_net — hunters reach it by"
+Write-Output "Ports 445/3389/8000 should read 'blocked' or time out."
+Write-Output ""
+Write-Output "This does NOT block the decoy on decoy_net - hunters reach it by"
 Write-Output "container DNS, which never traverses the host."
