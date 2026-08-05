@@ -41,7 +41,9 @@ VAULT = CanaryVault(DB)
 QUEUE = URLQueue(rate_per_minute=30)
 INTERVENTIONS = InterventionQueue(db=DB)
 SUBSTRATE = substrate_mod.load()
-SWARM = SwarmManager(QUEUE, DB, VAULT, INTERVENTIONS, headless=True, target=0,
+# Headed by default: a human cannot take over a headless browser, so running
+# headless silently makes the intervention queue unable to do its job.
+SWARM = SwarmManager(QUEUE, DB, VAULT, INTERVENTIONS, headless=False, target=0,
                      substrate=SUBSTRATE)
 
 
@@ -120,6 +122,7 @@ async def index(request: Request):
         "request": request,
         "state": system_state(interventions, visitors, hits),
         "containment": containment(),
+        "headless": SWARM.headless,
         "swarm": SWARM.status(),
         "interventions": interventions,
         "visitors": visitors,
@@ -140,6 +143,17 @@ async def index(request: Request):
 async def set_target(bots: int = Form(...)):
     SWARM.set_target(bots)
     alert("swarm", f"Target bot count set to {SWARM.target}")
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/swarm/headless")
+async def set_headless(mode: str = Form(...)):
+    headless = (mode == "headless")
+    SWARM.set_headless(headless)
+    alert("swarm", "Browser mode: " + (
+        "headless — faster, but you CANNOT take over a blocked bot"
+        if headless else
+        "headed — windows open so you can solve challenges yourself"))
     return RedirectResponse("/", status_code=303)
 
 

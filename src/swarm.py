@@ -94,6 +94,20 @@ class SwarmManager:
         self._target = max(0, int(n))
         return self._target
 
+    def set_headless(self, headless: bool) -> bool:
+        """Headed or headless, chosen by the operator.
+
+        This is not cosmetic. A human cannot take over a headless browser —
+        there is no window to click in — so an intervention raised by a
+        headless worker can be acknowledged but never actually solved. Run
+        headed whenever you intend to work the intervention queue.
+
+        Applies to workers started from now on; sessions already running keep
+        the mode they launched with.
+        """
+        self.headless = bool(headless)
+        return self.headless
+
     def live(self) -> int:
         return sum(1 for w in self._workers.values()
                    if w.status not in ("idle", "done"))

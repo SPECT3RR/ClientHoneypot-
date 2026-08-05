@@ -252,9 +252,29 @@
         </div>
         <div style="flex:0 0 auto"><button class="primary" type="submit">Apply</button></div>
       </form>
+      <form method="post" action="/swarm/headless" class="inline"
+            style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">
+        <div>
+          <label class="f">browser mode</label>
+          <select name="mode" style="width:100%">
+            <option value="headed" {% if not headless %}selected{% endif %}>
+              headed &mdash; you can take over</option>
+            <option value="headless" {% if headless %}selected{% endif %}>
+              headless &mdash; faster, no takeover</option>
+          </select>
+        </div>
+        <div style="flex:0 0 auto"><button type="submit">Set</button></div>
+      </form>
       <p class="muted" style="font-size:11px;margin:9px 0">
-        Parked bots don't consume capacity &mdash; a bot waiting on you never
-        starves the swarm.
+        {% if headless %}
+          <span class="pill danger">no takeover</span>
+          A headless bot has no window, so a blocked one can be acknowledged
+          but never actually solved. Switch to headed to work the queue.
+        {% else %}
+          Blocked bots open a real window you can drive. One window per live
+          bot &mdash; keep the target low while intervening.
+        {% endif %}
+        Parked bots never consume capacity.
       </p>
       <form method="post" action="/swarm/kill">
         <button class="danger" type="submit">Kill switch &mdash; stop everything</button>
