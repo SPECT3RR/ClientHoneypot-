@@ -392,8 +392,18 @@ class BrowserSession:
         try:
             await self._page.goto(url, referer=referrer or "",
                                   timeout=25000, wait_until="domcontentloaded")
-            await self.screenshot("landing")
-            await self.scan_page_source()
+            # goto() is bounded, but screenshot and content extraction are not:
+            # an ad-heavy page that never stops loading kept a live session
+            # stuck past navigation for seven minutes with no verdict written.
+            # Both are best-effort evidence, so cap them and carry on.
+            try:
+                await asyncio.wait_for(self.screenshot("landing"), timeout=20)
+            except asyncio.TimeoutError:
+                pass
+            try:
+                await asyncio.wait_for(self.scan_page_source(), timeout=25)
+            except asyncio.TimeoutError:
+                pass
             return True
         except Exception as e:
             await self.bus.publish(Event(

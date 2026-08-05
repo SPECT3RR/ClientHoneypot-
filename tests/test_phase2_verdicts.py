@@ -123,9 +123,20 @@ def test_classify_bands():
     assert classify(200) == "malicious"
 
 
-def test_observed_compromise_outranks_a_low_score():
+def test_a_critical_action_outranks_a_low_score():
     # A page that dropped an executable is malicious even if nothing matched.
-    assert classify(5, had_compromise=True) == "malicious"
+    assert classify(5, had_compromise=True, worst_action="CRITICAL") == "malicious"
+
+
+def test_low_severity_actions_alone_are_not_malicious():
+    """Live testing caught this: a runtime script injection and a third-party
+    CDN call are how the entire modern web works. Treating any action as
+    malicious made a site scoring ZERO come back malicious."""
+    assert classify(0, had_compromise=True, worst_action="LOW") == "clean"
+
+
+def test_a_high_action_raises_suspicion_not_a_conviction():
+    assert classify(10, had_compromise=True, worst_action="HIGH") == "suspicious"
 
 
 def test_lookup_returns_verdict_with_evidence(db):
@@ -183,6 +194,7 @@ async def test_db_records_compromise_actions_off_the_bus(tmp_path):
     await bus.stop()
 
     db.record_verdict("http://e/", 0, [], [], "continue")
+    # An executable download is CRITICAL, so it convicts on its own.
     assert db.lookup("http://e/")["verdict"] == "malicious"
     db.close()
 

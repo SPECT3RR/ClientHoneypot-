@@ -115,17 +115,28 @@ MALICIOUS_SCORE = 60
 SUSPICIOUS_SCORE = 30
 
 
-def classify(score: int, had_compromise: bool = False) -> str:
+def classify(score: int, had_compromise: bool = False,
+             worst_action: str = None) -> str:
     """Map a session score into a stored verdict.
 
-    An observed action of compromise outranks the score outright: a page that
-    dropped an executable is malicious whether or not a signature cluster
-    happened to fire.
+    A CRITICAL action outranks the score outright: a page that dropped an
+    executable or registered a service worker is malicious whether or not a
+    signature cluster fired.
+
+    Anything weaker does not. Treating *any* observed action as malicious
+    made every site on the live run come back malicious -- including one
+    that scored zero -- because a third-party CDN call and a runtime script
+    injection are how the entire modern web works. A HIGH action raises
+    suspicion and asks for corroboration; a LOW action is context, not a
+    verdict.
     """
-    if had_compromise or score >= MALICIOUS_SCORE:
+    if worst_action == "CRITICAL":
         return "malicious"
-    if score >= SUSPICIOUS_SCORE:
+    if score >= MALICIOUS_SCORE:
+        return "malicious"
+    if worst_action == "HIGH" or score >= SUSPICIOUS_SCORE:
         return "suspicious"
+    # had_compromise alone (LOW actions only) is not evidence of malice.
     return "clean"
 
 
@@ -156,6 +167,7 @@ class VerdictDB:
         self.conn.commit()
         self.session_id = session_id
         self._had_compromise = False
+        self._worst_action = None   # CRITICAL > HIGH > LOW
         self._current_url = None
 
     # ── bus wiring ─────────────────────────────────────────────────────────
@@ -182,6 +194,10 @@ class VerdictDB:
     async def _on_payload(self, event: Event) -> None:
         if event.type == "compromise_action":
             self._had_compromise = True
+            rank = {"LOW": 1, "HIGH": 2, "CRITICAL": 3}
+            sev = event.payload.get("severity", "LOW")
+            if rank.get(sev, 0) > rank.get(self._worst_action, 0):
+                self._worst_action = sev
             self.record_compromise(
                 url=event.payload.get("url") or self._current_url,
                 kind=event.payload.get("kind", "unknown"),
@@ -199,7 +215,7 @@ class VerdictDB:
         parsed = urlparse(url)
         host = parsed.netloc.lower()
         tld = "." + host.split(".")[-1].split(":")[0] if "." in host else ""
-        verdict = classify(score, self._had_compromise)
+        verdict = classify(score, self._had_compromise, self._worst_action)
 
         self.conn.execute(
             """INSERT INTO urls (url, host, tld, first_seen, last_seen,

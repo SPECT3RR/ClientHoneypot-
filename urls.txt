@@ -1,8 +1,24 @@
-https://www.dawn.com/
-https://www.aljazeera.com/
-http://zhongshujuan.com/
-https://aktifkaans-xpayllteer.duztorin.biz.id/
-http://aktifkandisinicxcx.mizone.biz.id/
-http://niralist.com.tr/ngsyubh/mwgd1ak/aruzoks/wp-sx1116/dmlkorea.html
-https://roblox.com.mu/communities/3183938804/Dragadopt
+# Live hunt targets.
+#
+# Piracy streaming and warez/crack download sites: the classic malvertising
+# and fake-installer surface — pop-unders, forced redirects, push-notification
+# traps, and "download" buttons that serve something other than advertised.
+#
+# Hunted under runtime.profile: docker, so sessions run inside a container in
+# the WSL2 VM and never on the host.
 
+https://ww8.123moviesfree.net/home/
+https://www.mkvmoviespoint.vet/
+https://mkvcinemas.as/
+https://myflixerfree.to/home
+https://www.lo4d.com/
+https://haxpc.net/application/
+
+# ── earlier batch, kept for reference ──────────────────────────────────────
+# https://www.dawn.com/
+# https://www.aljazeera.com/
+# http://zhongshujuan.com/
+# https://aktifkaans-xpayllteer.duztorin.biz.id/
+# http://aktifkandisinicxcx.mizone.biz.id/
+# http://niralist.com.tr/ngsyubh/mwgd1ak/aruzoks/wp-sx1116/dmlkorea.html
+# https://roblox.com.mu/communities/3183938804/Dragadopt

@@ -23,7 +23,8 @@ from reliability_layer import ReliabilityLayer
 from session_timeline import SessionTimelineRecorder
 from browser_controller import BrowserSession
 
-async def run_v2_session(target_url: str, headless: bool = True):
+async def run_v2_session(target_url: str, headless: bool = True,
+                         budget_seconds: float = 150.0):
     import datetime
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     session_id = f"v2_live_session_{timestamp}"
@@ -109,11 +110,19 @@ async def run_v2_session(target_url: str, headless: bool = True):
     
     if success:
         print("[+] Navigation successful. Handing control to Adaptive Weave Engine...")
-        
-        # Start the scheduler tick loop which will weave until the browser closes or hits DECOY
+
+        # A session must end even when nothing fires. Weaving "until the page
+        # closes" only ever terminated because the mock site always triggered
+        # the decoy; a real site that scores clean weaves forever and the
+        # verdict is never written. Live hunting needs a budget.
+        deadline = asyncio.get_running_loop().time() + budget_seconds
+
         try:
-            # Weave indefinitely until page closes
             while not browser._page.is_closed():
+                if asyncio.get_running_loop().time() > deadline:
+                    print(f"[+] Session budget of {budget_seconds}s reached — "
+                          f"recording the verdict as observed.")
+                    break
                 await interaction_scheduler.tick(browser._page)
                 if ownership_mgr.current_owner.name == "DECOY":
                     print("[!] DECOY state detected. Waiting for the decoy walk "
@@ -177,6 +186,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the v2 Adaptive Weave Engine")
     parser.add_argument("url", nargs="?", default="https://example.com", help="Target URL")
     parser.add_argument("--headed", action="store_true", help="Run with visible browser window")
+    parser.add_argument("--budget", type=float, default=150.0,
+                        help="Max seconds to weave before recording the verdict "
+                             "(default 150). A real site that never triggers the "
+                             "decoy would otherwise weave forever.")
     args = parser.parse_args()
-    
-    asyncio.run(ReliabilityLayer.safe_execute(run_v2_session(args.url, headless=not args.headed)))
+
+    asyncio.run(ReliabilityLayer.safe_execute(
+        run_v2_session(args.url, headless=not args.headed,
+                       budget_seconds=args.budget)))

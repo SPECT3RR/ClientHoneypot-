@@ -24,8 +24,13 @@ from threat_detection import SUSPICIOUS_EXTENSIONS
 # Runtime instrumentation event type -> (action kind, severity).
 # CRITICAL escalates payload confidence and therefore triggers diversion.
 RUNTIME_ACTIONS = {
-    "dynamic_script_injection":     ("dynamic_code_injection", "HIGH"),
-    "dynamic_iframe_injection":     ("dynamic_code_injection", "HIGH"),
+    # Downgraded from HIGH after live testing: every modern site injects
+    # script and iframe elements at runtime -- React, tag managers, ad tags.
+    # Rating it HIGH made a clean piracy-adjacent site with zero score come
+    # back "malicious", which is how a detector loses an operator's trust.
+    # Interesting only alongside obfuscation or a hostile source.
+    "dynamic_script_injection":     ("dynamic_code_injection", "LOW"),
+    "dynamic_iframe_injection":     ("dynamic_code_injection", "LOW"),
     "service_worker_registration":  ("persistence",            "CRITICAL"),
     "storage_exfil_write":          ("data_exfiltration",      "HIGH"),
     "clipboard_read_runtime":       ("data_exfiltration",      "HIGH"),

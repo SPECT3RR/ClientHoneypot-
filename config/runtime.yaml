@@ -11,6 +11,9 @@
 # 'firecracker' is not implemented: it needs a Linux/KVM host, which Windows 11
 # Home cannot provide. The interface in src/substrate.py is ready for it.
 
+# Live hunting is an explicit opt-in, never the shipped default. Either change
+# this to `docker` on your own machine, or set CH_SUBSTRATE=docker for a single
+# run. The test suite asserts this file ships as `local`.
 runtime:
   profile: local
 
