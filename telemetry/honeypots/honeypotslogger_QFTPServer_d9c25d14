@@ -1,0 +1,8 @@
+{'action': 'process', 'status': 'success', 'src_ip': '0.0.0.0', 'src_port': 21, 'server': 'ftp_server', 'dest_ip': '0.0.0.0', 'dest_port': 21}
+{'action': 'connection', 'src_ip': '172.17.0.1', 'src_port': 48382, 'server': 'ftp_server', 'dest_ip': '0.0.0.0', 'dest_port': 21}
+{'action': 'command', 'data': {'cmd': 'USER', 'args': "('file_drop',)"}, 'src_ip': '172.17.0.1', 'src_port': 48382, 'server': 'ftp_server', 'dest_ip': '0.0.0.0', 'dest_port': 21}
+{'action': 'command', 'data': {'cmd': 'PASS', 'args': "('FtpDrop2026!',)"}, 'src_ip': '172.17.0.1', 'src_port': 48382, 'server': 'ftp_server', 'dest_ip': '0.0.0.0', 'dest_port': 21}
+{'action': 'login', 'status': 'success', 'src_ip': '172.17.0.1', 'src_port': 48382, 'username': 'file_drop', 'password': 'FtpDrop2026!', 'server': 'ftp_server', 'dest_ip': '0.0.0.0', 'dest_port': 21}
+{'action': 'command', 'data': {'cmd': 'TYPE', 'args': "('A',)"}, 'src_ip': '172.17.0.1', 'src_port': 48382, 'server': 'ftp_server', 'dest_ip': '0.0.0.0', 'dest_port': 21}
+{'action': 'command', 'data': {'cmd': 'PASV', 'args': '()'}, 'src_ip': '172.17.0.1', 'src_port': 48382, 'server': 'ftp_server', 'dest_ip': '0.0.0.0', 'dest_port': 21}
+{'action': 'command', 'data': {'cmd': 'QUIT', 'args': '()'}, 'src_ip': '172.17.0.1', 'src_port': 48382, 'server': 'ftp_server', 'dest_ip': '0.0.0.0', 'dest_port': 21}
