@@ -14,6 +14,7 @@ from playwright_stealth import Stealth
 from persona import fingerprint_init_script
 from instrumentation import INSTRUMENTATION_JS
 from bait_seeder import BaitSeeder
+from discovery import permissive_args
 from cleanup import wipe_temp_profile
 from event_bus import EventBus, Event, EventCategory
 
@@ -69,6 +70,12 @@ class BrowserSession:
         
         args = ["--disable-blink-features=AutomationControlled", "--test-type",
                 "--disable-infobars", "--disable-popup-blocking"]
+        # Chrome's defaults hide exactly what we hunt: a blocked pop-under is
+        # a redirect chain we never see, and blocked mixed content is a
+        # payload that never runs. Unblocked only when contained -- disabling
+        # web security and safe browsing on the host would hand a hunted page
+        # the run of the machine.
+        args += permissive_args(_in_container())
         # Stripping --no-sandbox hides the automation tell on a normal desktop,
         # but inside the hunting container it kills Chromium outright: with
         # --cap-drop ALL and a non-root user its setuid sandbox cannot

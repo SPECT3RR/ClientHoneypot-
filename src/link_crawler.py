@@ -30,7 +30,8 @@ SKIP_SCHEMES = ("mailto:", "tel:", "javascript:", "data:", "blob:", "#")
 
 class LinkCrawler:
     def __init__(self, browser, bus, max_depth: int = 2, max_clicks: int = 12,
-                 max_seconds: float = 90.0, max_tabs: int = 6):
+                 max_seconds: float = 90.0, max_tabs: int = 6,
+                 on_discovery=None, anchor: bool = False):
         self.browser = browser
         self.bus = bus
         self.max_depth = max_depth
@@ -38,10 +39,26 @@ class LinkCrawler:
         self.max_seconds = max_seconds
         self.max_tabs = max_tabs
 
+        # When set, a redirect or popup is HANDED OFF to spawn its own bot
+        # instead of being chased here. An anchor bot then never leaves the
+        # URL the operator gave it — it keeps working that page while
+        # children pursue everything it kicks up.
+        self.on_discovery = on_discovery
+        self.anchor = anchor
+
         self.visited: set = set()
         self.edges: list = []
+        self.discoveries: list = []
         self.clicks = 0
         self._deadline = None
+
+    def _hand_off(self, url: str, trigger: str) -> bool:
+        """Report a discovery for the swarm to spawn a bot against."""
+        if not self.on_discovery or not url:
+            return False
+        self.discoveries.append({"url": url, "trigger": trigger})
+        self.on_discovery(url, trigger)
+        return True
 
     def _expired(self) -> bool:
         return (self.clicks >= self.max_clicks
@@ -86,7 +103,12 @@ class LinkCrawler:
                 self.visited.add(current)
                 self._record(origin, current, "click")
                 await self._snapshot(page)
-                await self._walk(page, current, depth + 1)
+                # An anchor bot hands the destination off and returns to its
+                # own page; a plain crawler follows it inline as before.
+                if self.anchor and self._hand_off(current, "redirect"):
+                    pass
+                else:
+                    await self._walk(page, current, depth + 1)
                 try:
                     await page.go_back(timeout=8000)
                 except Exception:
@@ -100,6 +122,8 @@ class LinkCrawler:
                 self.visited.add(popup.url)
                 self._record(origin, popup.url, "popup")
                 await self._snapshot(popup)
+                # A pop-under is the classic malvertising hop. Give it a bot.
+                self._hand_off(popup.url, "popup")
                 if len(page.context.pages) > self.max_tabs:
                     try:
                         await popup.close()

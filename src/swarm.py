@@ -28,15 +28,18 @@ from interventions import detect_block
 from link_crawler import LinkCrawler
 from nav_replay import build_journey
 from canary_vault import default_seed_tokens
+from discovery import Discovery, DiscoveryQueue, permissive_args
 import capacity
 import substrate as substrate_mod
 
 
 class WorkerState:
     __slots__ = ("worker_id", "session_id", "url", "status", "score",
-                 "verdict", "started", "persona")
+                 "verdict", "started", "persona", "kind", "depth",
+                 "parent_worker", "trigger", "spawned")
 
-    def __init__(self, worker_id):
+    def __init__(self, worker_id, kind="anchor", depth=0,
+                 parent_worker=None, trigger=None):
         self.worker_id = worker_id
         self.session_id = None
         self.url = None
@@ -45,12 +48,20 @@ class WorkerState:
         self.verdict = None
         self.started = None
         self.persona = None
+        # anchor = a URL the operator supplied; child = something a bot found.
+        self.kind = kind
+        self.depth = depth
+        self.parent_worker = parent_worker
+        self.trigger = trigger
+        self.spawned = 0
 
     def as_dict(self):
         return {"worker_id": self.worker_id, "session_id": self.session_id,
                 "url": self.url, "status": self.status, "score": self.score,
                 "verdict": self.verdict, "persona": self.persona,
-                "started": self.started}
+                "started": self.started, "kind": self.kind,
+                "depth": self.depth, "parent_worker": self.parent_worker,
+                "trigger": self.trigger, "spawned": self.spawned}
 
 
 class SwarmManager:
@@ -73,6 +84,9 @@ class SwarmManager:
         # stamped with a session id — so a callback later could not be traced
         # back to the visit that planted it, which is the whole point.
         # Idempotent: a vault the operator has already filled is left alone.
+        # Discoveries spawn their own bots rather than being chased inline.
+        self.discoveries = DiscoveryQueue()
+
         minted = default_seed_tokens(self.vault)
         if minted:
             print(f"[swarm] minted {len(minted)} self-hosted bait tokens "
@@ -141,6 +155,7 @@ class SwarmManager:
             "queued": len(self.queue),
             "by_status": counts,
             "workers": states,
+            "discoveries": self.discoveries.stats(),
         }
 
     def kill(self) -> None:
@@ -169,15 +184,32 @@ class SwarmManager:
             active = sum(1 for w in self._workers.values()
                          if w.status not in ("idle", "done", "parked"))
 
-            if active < self._target and len(self.queue) > 0:
-                wid = self._next_id
-                self._next_id += 1
-                state = WorkerState(wid)
-                self._workers[wid] = state
-                self._tasks[wid] = asyncio.create_task(self._worker(state))
+            if active < self._target:
+                # Discoveries first: a redirect the swarm just uncovered is
+                # hotter than the next URL on a static list, and the chain
+                # goes cold if the tab that spawned it is long gone.
+                found = self.discoveries.next()
+                if found is not None:
+                    wid = self._next_id
+                    self._next_id += 1
+                    state = WorkerState(wid, kind="child", depth=found.depth,
+                                        parent_worker=found.parent_worker,
+                                        trigger=found.trigger)
+                    parent = self._workers.get(found.parent_worker)
+                    if parent:
+                        parent.spawned += 1
+                    self._workers[wid] = state
+                    self._tasks[wid] = asyncio.create_task(
+                        self._worker(state, discovery=found))
+                elif len(self.queue) > 0:
+                    wid = self._next_id
+                    self._next_id += 1
+                    state = WorkerState(wid, kind="anchor", depth=0)
+                    self._workers[wid] = state
+                    self._tasks[wid] = asyncio.create_task(self._worker(state))
 
             if (exit_when_drained and not self._tasks
-                    and len(self.queue) == 0):
+                    and len(self.queue) == 0 and len(self.discoveries) == 0):
                 break
             await asyncio.sleep(poll)
 
@@ -186,8 +218,12 @@ class SwarmManager:
 
     # ── one hunting session ────────────────────────────────────────────────
 
-    async def _worker(self, state: WorkerState) -> None:
-        entry = await self.queue.next()
+    async def _worker(self, state: WorkerState, discovery=None) -> None:
+        if discovery is not None:
+            entry = type("Entry", (), {"url": discovery.url,
+                                       "referrer_chain": []})()
+        else:
+            entry = await self.queue.next()
         if entry is None:
             state.status = "done"
             return
@@ -295,7 +331,23 @@ class SwarmManager:
                         await bus.drain()
 
                 if state.status == "hunting":
-                    crawler = LinkCrawler(browser, bus, max_depth=self.crawl_depth)
+                    def report(url, trigger, _s=state):
+                        """Hand a redirect or popup to the swarm as its own bot.
+
+                        The anchor bot stays on the operator's URL and keeps
+                        working it; the destination gets a fresh bot with its
+                        own persona, profile and bait, and its discoveries
+                        spawn again. That is how three bots become fifteen.
+                        """
+                        self.discoveries.offer(Discovery(
+                            url, parent_session=_s.session_id,
+                            parent_worker=_s.worker_id,
+                            depth=_s.depth + 1, trigger=trigger))
+
+                    crawler = LinkCrawler(browser, bus,
+                                          max_depth=self.crawl_depth,
+                                          on_discovery=report,
+                                          anchor=True)
                     await crawler.explore()
                     await bus.drain()
 
@@ -332,8 +384,12 @@ class SwarmManager:
             if state.status not in ("cancelled", "error"):
                 state.status = "done"
             self.completed += 1
-            print(f"[worker {state.worker_id}] {entry.url} -> "
-                  f"{state.verdict} (score {state.score})")
+            tag = (f"{state.kind}" if state.kind == "anchor"
+                   else f"child d{state.depth} via {state.trigger} "
+                        f"of #{state.parent_worker}")
+            print(f"[worker {state.worker_id}] ({tag}) {entry.url} -> "
+                  f"{state.verdict} (score {state.score})"
+                  + (f" spawned {state.spawned}" if state.spawned else ""))
 
     async def _containerised_session(self, state: WorkerState, entry) -> None:
         """Delegate one session to a disposable container in the WSL2 VM.

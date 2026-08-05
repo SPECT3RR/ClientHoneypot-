@@ -26,9 +26,15 @@ from pathlib import Path
 HEADED_MB = 450
 HEADLESS_MB = 280
 
-# Never consume the last of RAM: the dashboard, decoy, and Docker still need
+# Never consume the last of RAM: the dashboard, decoy and Docker still need
 # room, and swapping makes every session slower than running fewer would be.
-RESERVE_MB = 700
+#
+# Calibrated against this machine rather than guessed. At 700 MB the governor
+# refused to start a single bot on a box with 975 MB available -- technically
+# defensible, practically useless. 300 MB leaves real headroom while letting a
+# constrained machine still hunt; Windows pages rather than OOM-kills, so the
+# failure mode of being slightly optimistic is slowness, not a lost verdict.
+RESERVE_MB = 300
 
 MIN_BOTS = 1
 MAX_BOTS = 50
