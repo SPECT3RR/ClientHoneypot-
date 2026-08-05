@@ -193,7 +193,21 @@ class SwarmManager:
             active = sum(1 for w in self._workers.values()
                          if w.status not in ("idle", "done", "parked"))
 
-            if active < self._target:
+            # Re-check capacity at SPAWN time, not just when the target was
+            # set. Free memory moves: three headed bots were allowed to start
+            # into 640 MB, were starved, produced nothing, and that nothing
+            # was recorded as a clean verdict. A bot that cannot run properly
+            # is worse than a bot that does not run.
+            room = capacity.max_bots(headless=self.headless)
+            if active >= room and active > 0:
+                self.capacity_reason = (
+                    f"holding at {active}: only {capacity.available_mb()} MB "
+                    f"available, {capacity.bot_cost_mb(self.headless)} MB per "
+                    f"{'headless' if self.headless else 'headed'} bot")
+                await asyncio.sleep(poll)
+                continue
+
+            if active < self._target and active < room:
                 # Discoveries first: a redirect the swarm just uncovered is
                 # hotter than the next URL on a static list, and the chain
                 # goes cold if the tab that spawned it is long gone.
@@ -384,7 +398,7 @@ class SwarmManager:
                 state.verdict = db.record_verdict(
                     url=entry.url, score=scorer.score, clusters=scorer.clusters,
                     findings=[f["label"] for f in scorer.summary()["findings"]],
-                    decision=policy.current_state)
+                    decision=(policy.current_state if ok else "navigation_failed"))
             except Exception:
                 state.verdict = "unknown"
             db.close()

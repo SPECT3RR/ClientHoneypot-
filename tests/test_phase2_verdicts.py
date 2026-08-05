@@ -238,3 +238,15 @@ async def test_threat_scorer_stops_scoring_after_diversion():
     await bus.stop()
 
     assert scorer.score == 0, "decoy pages must not inflate the target's score"
+
+
+def test_an_unreachable_page_is_not_clean():
+    """A typo'd URL and a dead C2 both came back 'clean' — which says the
+    page was examined and found safe. It was never examined at all."""
+    assert classify(0, False, None, reachable=False) == "unreachable"
+    assert classify(0, False, None, reachable=True) == "clean"
+
+
+def test_navigation_failure_records_unreachable(db):
+    db.record_verdict("http://127.0.0.1/8001", 0, [], [], "navigation_failed")
+    assert db.lookup("http://127.0.0.1/8001")["verdict"] == "unreachable"

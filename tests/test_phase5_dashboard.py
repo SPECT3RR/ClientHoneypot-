@@ -204,3 +204,39 @@ def test_swarm_leaves_an_operator_filled_vault_alone(tmp_path):
     rows = vault.for_placement("browser_profile")
     assert len(rows) == 1 and rows[0]["value"] == "AKIAREALCANARY"
     db.close()
+
+
+@pytest.mark.asyncio
+async def test_capacity_is_rechecked_before_each_spawn(tmp_path, monkeypatch):
+    """The target is set once; free memory moves constantly. Three headed
+    bots were allowed to start into 640 MB, were starved, produced nothing,
+    and that nothing was recorded as a clean verdict."""
+    import capacity
+    from url_queue import URLQueue
+    from canary_vault import CanaryVault
+    from swarm import SwarmManager
+
+    db = VerdictDB(db_path=tmp_path / "v.db", session_id="s")
+    q = URLQueue(rate_per_minute=600)
+    for i in range(5):
+        q.add(f"http://127.0.0.1:8080/{i}")
+
+    # Plenty of room when the target is set...
+    monkeypatch.setattr(capacity, "available_mb",
+                        lambda: capacity.RESERVE_MB + 4000)
+    swarm = SwarmManager(q, db, CanaryVault(db), InterventionQueue(),
+                         headless=True, substrate=None)
+    assert swarm.set_target(5) == 5
+
+    # ...and none by the time workers would spawn.
+    monkeypatch.setattr(capacity, "available_mb", lambda: capacity.RESERVE_MB)
+    assert capacity.max_bots(headless=True) == 0
+
+    task = asyncio.create_task(swarm.run(poll=0.05))
+    await asyncio.sleep(0.4)
+    swarm.kill()
+    await asyncio.wait_for(task, timeout=10)
+
+    started = [w for w in swarm.status()["workers"]]
+    assert len(started) <= 1, f"spawned {len(started)} with no memory available"
+    db.close()

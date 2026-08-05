@@ -116,7 +116,7 @@ SUSPICIOUS_SCORE = 30
 
 
 def classify(score: int, had_compromise: bool = False,
-             worst_action: str = None) -> str:
+             worst_action: str = None, reachable: bool = True) -> str:
     """Map a session score into a stored verdict.
 
     A CRITICAL action outranks the score outright: a page that dropped an
@@ -130,6 +130,12 @@ def classify(score: int, had_compromise: bool = False,
     suspicion and asks for corroboration; a LOW action is context, not a
     verdict.
     """
+    # An unreachable page was never examined. Reporting it as clean is a
+    # lie: a typo'd URL and a dead C2 both come back "safe", and the operator
+    # has no way to tell that nothing was actually looked at.
+    if not reachable:
+        return "unreachable"
+
     if worst_action == "CRITICAL":
         return "malicious"
     if score >= MALICIOUS_SCORE:
@@ -215,7 +221,9 @@ class VerdictDB:
         parsed = urlparse(url)
         host = parsed.netloc.lower()
         tld = "." + host.split(".")[-1].split(":")[0] if "." in host else ""
-        verdict = classify(score, self._had_compromise, self._worst_action)
+        verdict = classify(score, self._had_compromise,
+                           self._worst_action,
+                           reachable=(decision != 'navigation_failed'))
 
         self.conn.execute(
             """INSERT INTO urls (url, host, tld, first_seen, last_seen,
