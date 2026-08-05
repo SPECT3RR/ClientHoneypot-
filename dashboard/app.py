@@ -35,6 +35,7 @@ import substrate as substrate_mod              # noqa: E402
 from evidence import TriageStore, explain      # noqa: E402
 import third_party                             # noqa: E402
 import threatintel                             # noqa: E402
+import intel_keys                              # noqa: E402
 import urllib.request                          # noqa: E402
 
 DECOY_BASE = "http://127.0.0.1:8001"
@@ -95,9 +96,9 @@ def system_state(interventions: list, visitors: dict, hits: list) -> str:
 
 ALERTS: list = []
 PAUSED: list = []          # containers the dashboard stopped, so it can restore them
-# Feed keys live in memory only: a key pasted into a dashboard should not end
-# up in a file the operator forgets about.
-INTEL_KEYS: dict = {}
+# Feed keys: entered once, persisted to a gitignored file, loaded at startup.
+# intel_keys.save() refuses to write if git is not ignoring the path.
+INTEL_KEYS: dict = intel_keys.expand(intel_keys.load())
 _subscribers: list = []
 
 URL_RE = re.compile(r"https?://[^\s\"'<>,;]+", re.IGNORECASE)
@@ -229,6 +230,8 @@ async def index(request: Request):
         "intel_active": threatintel.Enricher(DB, INTEL_KEYS).active(),
         "intel_missing": threatintel.Enricher(DB, INTEL_KEYS).missing_keys(),
         "intel_providers": sorted(threatintel.PROVIDERS),
+        "intel_keys": intel_keys.status(),
+        "intel_status": threatintel.Enricher(DB, INTEL_KEYS).status(),
         "third_party": _third_party_view(20),
         "alerts": ALERTS[:40],
         "placements": PLACEMENTS,
@@ -346,16 +349,29 @@ async def set_intel_key(provider: str = Form(...), key: str = Form(...)):
     a file the operator forgets about. Re-enter after a restart.
     """
     key = (key or "").strip()
-    if provider not in threatintel.PROVIDERS or not key:
+    if provider not in intel_keys.SIGNUP or not key:
         alert("error", f"unknown provider or empty key: {provider!r}")
         return RedirectResponse("/", status_code=303)
-    INTEL_KEYS[provider] = key
-    # abuse.ch issues one key that covers both of its services.
-    if provider in ("urlhaus", "threatfox"):
-        INTEL_KEYS.setdefault("urlhaus", key)
-        INTEL_KEYS.setdefault("threatfox", key)
-    alert("intel", f"{provider} key set — "
-                   f"{len(threatintel.Enricher(DB, INTEL_KEYS).active())} provider(s) active")
+
+    ok, message = intel_keys.save({provider: key})
+    if not ok:
+        alert("error", message)      # refuses to write a git-visible path
+        return RedirectResponse("/", status_code=303)
+
+    INTEL_KEYS.clear()
+    INTEL_KEYS.update(intel_keys.expand(intel_keys.load()))
+    active = threatintel.Enricher(DB, INTEL_KEYS).active()
+    alert("intel", f"{provider} key stored (one-time) — active: "
+                   f"{', '.join(active) or 'none'}")
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/intel/key/{provider}/forget")
+async def forget_intel_key(provider: str):
+    intel_keys.remove(provider)
+    INTEL_KEYS.clear()
+    INTEL_KEYS.update(intel_keys.expand(intel_keys.load()))
+    alert("intel", f"{provider} key removed")
     return RedirectResponse("/", status_code=303)
 
 
@@ -390,8 +406,14 @@ async def scan_hosts(limit: int = Form(20)):
             flagged += 1
             alert("intel", f"{entry['host']} — {verdict['verdict'].upper()} "
                            f"per {', '.join(verdict['flagged_by'])}")
-    alert("intel", f"checked {len(hosts)} host(s) via "
-                   f"{', '.join(enricher.active())}: {flagged} flagged")
+
+    # Say plainly when a provider dropped out mid-scan, so a thin result is
+    # not mistaken for a clean sweep.
+    for st in enricher.status():
+        if st["last_error"]:
+            alert("intel", f"{st['provider']} stood down ({st['last_error']}) — "
+                           f"the remaining providers carried the scan")
+    alert("intel", f"checked {len(hosts)} host(s): {flagged} flagged")
     return RedirectResponse("/", status_code=303)
 
 

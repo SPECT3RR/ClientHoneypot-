@@ -166,3 +166,95 @@ def test_answers_are_cached_so_quota_is_spent_once(db, monkeypatch):
     e.lookup("x.test")
     e.lookup("x.test")
     assert calls == ["x.test"], "a cached answer must not re-spend quota"
+
+
+# ── persistent keys ────────────────────────────────────────────────────────
+
+def test_keys_survive_a_restart(tmp_path):
+    """One-time setup: re-entering a key after every restart is the thing
+    that was explicitly not wanted."""
+    import intel_keys as ik
+    f = tmp_path / "keys.json"
+    ok, _ = ik.save({"abusech": "SECRET123"}, f)
+    assert ok
+    assert ik.load(f) == {"abusech": "SECRET123"}
+
+
+def test_one_abusech_key_covers_both_of_its_services():
+    import intel_keys as ik
+    resolved = ik.expand({"abusech": "K"})
+    assert resolved["urlhaus"] == "K" and resolved["threatfox"] == "K"
+
+
+def test_writing_keys_to_a_git_visible_path_is_refused(tmp_path, monkeypatch):
+    """A key written into a tracked path is a key that gets pushed."""
+    import intel_keys as ik
+    monkeypatch.setattr(ik, "_is_git_tracked", lambda p: True)
+    ok, msg = ik.save({"virustotal": "K"}, tmp_path / "keys.json")
+    assert ok is False and "gitignore" in msg
+
+
+def test_the_real_key_file_is_gitignored():
+    import subprocess
+    from pathlib import Path
+    root = Path(__file__).parent.parent
+    proc = subprocess.run(["git", "check-ignore", "-q",
+                           "config/intel_keys.json"],
+                          cwd=str(root), capture_output=True)
+    assert proc.returncode == 0, "config/intel_keys.json must be gitignored"
+
+
+def test_every_provider_has_a_signup_route():
+    """The operator has to be able to go and get each key."""
+    import intel_keys as ik
+    for name, (url, note) in ik.SIGNUP.items():
+        assert url.startswith("https://") and note
+
+
+# ── failover ───────────────────────────────────────────────────────────────
+
+def test_a_quota_wall_stands_the_provider_down_not_the_scan():
+    p = ti.PROVIDERS["virustotal"]("k")
+    assert p.available() is True
+    p.mark_exhausted(600, "HTTP 429 quota")
+    assert p.available() is False
+    assert p.status()["cooldown_seconds"] > 0
+
+
+def test_a_daily_cap_retires_a_provider():
+    p = ti.PROVIDERS["urlscan"]("k")
+    p.used_today = p.per_day
+    assert p.available() is False
+
+
+def test_an_exhausted_provider_is_skipped_and_others_carry_on(db):
+    calls = []
+
+    class Dead(ti.Provider):
+        name = "dead"; needs_key = False; per_minute = 0
+        def lookup(self, host):
+            calls.append("dead"); return {"verdict": "clean", "score": 0, "detail": {}}
+
+    class Alive(ti.Provider):
+        name = "alive"; needs_key = False; per_minute = 0
+        def lookup(self, host):
+            calls.append("alive")
+            return {"verdict": "malicious", "score": 4, "detail": {}}
+
+    e = ti.Enricher(db, {})
+    dead, alive = Dead(), Alive()
+    dead.mark_exhausted(600, "quota")
+    e.providers = [dead, alive]
+
+    results = e.lookup("x.test")
+    assert calls == ["alive"], "the exhausted provider must be skipped"
+    assert ti.consensus(results)["verdict"] == "malicious"
+
+
+def test_safebrowsing_is_the_deepest_fallback():
+    """When VirusTotal's 500/day runs dry, something has to carry on."""
+    assert ti.PROVIDERS["safebrowsing"].per_day > ti.PROVIDERS["virustotal"].per_day
+
+
+def test_six_providers_are_available_to_fall_back_through():
+    assert len(ti.PROVIDERS) == 6

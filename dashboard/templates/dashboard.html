@@ -575,27 +575,57 @@
         </span></h4>
 
       <form method="post" action="/intel/key" class="inline">
-        <div style="flex:0 0 130px">
+        <div style="flex:0 0 140px">
           <label class="f">provider</label>
           <select name="provider" style="width:100%">
-            {% for p in intel_providers %}
-              <option value="{{ p }}">{{ p }}{% if p in intel_active %} &#10003;{% endif %}</option>
+            {% for name, k in intel_keys.items() %}
+              <option value="{{ name }}">{{ name }}{% if k.configured %} &#10003;{% endif %}</option>
             {% endfor %}
           </select>
         </div>
         <div style="flex:2">
           <label class="f">API key</label>
-          <input name="key" type="password" placeholder="paste key" style="width:100%">
+          <input name="key" type="password" placeholder="paste once" style="width:100%">
         </div>
-        <div style="flex:0 0 auto"><button class="primary" type="submit">Set</button></div>
+        <div style="flex:0 0 auto"><button class="primary" type="submit">Save</button></div>
       </form>
-
-      <p class="muted" style="font-size:11px;margin:9px 0">
-        Held in memory only, never written to disk &mdash; re-enter after a restart.
-        All four are free: <b>auth.abuse.ch</b> issues one key covering
-        URLhaus + ThreatFox, <b>virustotal.com</b> gives 4 req/min,
-        <b>otx.alienvault.com</b> is generous.
+      <p class="muted" style="font-size:11px;margin:8px 0 12px">
+        Saved once to <code>config/intel_keys.json</code>, which is gitignored
+        &mdash; the writer refuses if git can see the path, so a key cannot be
+        pushed by accident. Loaded automatically on every restart.
       </p>
+
+      <table style="margin-bottom:12px">
+        <thead><tr><th>provider</th><th>status</th><th>quota</th><th>get a free key</th><th></th></tr></thead>
+        <tbody>
+        {% for name, k in intel_keys.items() %}
+          <tr>
+            <td>{{ name }}</td>
+            <td>
+              {% if k.configured %}<span class="tag clean">configured</span>
+              {% else %}<span class="muted">not set</span>{% endif %}
+            </td>
+            <td class="muted" style="font-size:11px">
+              {% set st = intel_status | selectattr('provider','equalto',name) | first %}
+              {% if st %}
+                {{ st.per_minute }}/min{% if st.per_day %}, {{ st.per_day }}/day{% endif %}
+                {% if st.cooldown_seconds %}
+                  <span class="parked">&mdash; standing down {{ st.cooldown_seconds }}s
+                    ({{ st.last_error }})</span>
+                {% endif %}
+              {% else %}&mdash;{% endif %}
+            </td>
+            <td><a href="{{ k.url }}" target="_blank" rel="noopener"
+                   style="font-size:11px">{{ k.url.split('/')[2] }}</a>
+                <span class="muted" style="font-size:10px">{{ k.note }}</span></td>
+            <td>{% if k.configured %}
+              <form method="post" action="/intel/key/{{ name }}/forget">
+                <button class="danger" type="submit" style="padding:1px 7px">&times;</button>
+              </form>{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
 
       <div style="margin:11px 0 9px">
         <div class="stat"><b>{{ intel_stats.hosts }}</b><span>hosts seen</span></div>

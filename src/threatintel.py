@@ -90,17 +90,52 @@ def _get_json(url: str, headers: dict = None, timeout: int = 20):
 
 # ── providers ──────────────────────────────────────────────────────────────
 
+# HTTP codes that mean "this provider is done for now", not "this host is
+# clean". Treating a quota wall as a clean verdict is how a scan silently
+# stops finding anything.
+EXHAUSTED_CODES = {204, 429}
+AUTH_CODES = {401, 403}
+
+
 class Provider:
     name = "base"
     needs_key = False
     per_minute = 30
+    per_day = None          # None = no documented daily cap
 
     def __init__(self, api_key: str = None):
         self.api_key = api_key
         self.limiter = RateLimiter(self.per_minute)
+        self.used_today = 0
+        self.exhausted_until = 0.0
+        self.last_error = None
 
     def available(self) -> bool:
-        return bool(self.api_key) if self.needs_key else True
+        if self.needs_key and not self.api_key:
+            return False
+        if time.time() < self.exhausted_until:
+            return False
+        if self.per_day and self.used_today >= self.per_day:
+            return False
+        return True
+
+    def mark_exhausted(self, seconds: float = 3600, reason: str = "quota"):
+        """Stand this provider down so the scan moves to the next one."""
+        self.exhausted_until = time.time() + seconds
+        self.last_error = reason
+
+    def status(self) -> dict:
+        remaining = max(0, self.exhausted_until - time.time())
+        return {
+            "provider": self.name,
+            "has_key": bool(self.api_key) or not self.needs_key,
+            "available": self.available(),
+            "used_today": self.used_today,
+            "per_day": self.per_day,
+            "per_minute": self.per_minute,
+            "cooldown_seconds": int(remaining),
+            "last_error": self.last_error,
+        }
 
     def lookup(self, host: str) -> dict:
         raise NotImplementedError
@@ -115,6 +150,7 @@ class URLhaus(Provider):
     name = "urlhaus"
     needs_key = True
     per_minute = 60
+    per_day = None
 
     def lookup(self, host: str) -> dict:
         self.limiter.wait()
@@ -148,6 +184,7 @@ class VirusTotal(Provider):
     name = "virustotal"
     needs_key = True
     per_minute = 4
+    per_day = 500
 
     def lookup(self, host: str) -> dict:
         self.limiter.wait()
@@ -186,6 +223,7 @@ class OTX(Provider):
     name = "otx"
     needs_key = True
     per_minute = 30
+    per_day = None
 
     def lookup(self, host: str) -> dict:
         self.limiter.wait()
@@ -211,6 +249,7 @@ class ThreatFox(Provider):
     name = "threatfox"
     needs_key = True
     per_minute = 60
+    per_day = None
 
     def lookup(self, host: str) -> dict:
         self.limiter.wait()
@@ -228,7 +267,79 @@ class ThreatFox(Provider):
                                               for i in iocs if i.get("malware_printable")})[:8]}}
 
 
-PROVIDERS = {p.name: p for p in (URLhaus, VirusTotal, OTX, ThreatFox)}
+class URLScan(Provider):
+    """urlscan.io. Free key, 100 searches/day, rich page-level context."""
+    name = "urlscan"
+    needs_key = True
+    per_minute = 30
+    per_day = 100
+
+    def lookup(self, host: str) -> dict:
+        self.limiter.wait()
+        query = urllib.parse.quote(f'page.domain:"{host}"')
+        data = _get_json(
+            f"https://urlscan.io/api/v1/search/?q={query}&size=20",
+            headers={"API-Key": self.api_key})
+
+        results = data.get("results") or []
+        malicious = [r for r in results
+                     if ((r.get("verdicts") or {}).get("overall") or {}).get("malicious")]
+        tags = sorted({t for r in results
+                       for t in (((r.get("verdicts") or {}).get("overall") or {})
+                                 .get("categories") or [])})
+        return {
+            "verdict": "malicious" if malicious else
+                       "suspicious" if results and tags else "clean",
+            "score": len(malicious),
+            "detail": {"scans": len(results), "malicious_scans": len(malicious),
+                       "categories": tags[:8],
+                       "reference": f"https://urlscan.io/search/#{host}"},
+        }
+
+
+class SafeBrowsing(Provider):
+    """Google Safe Browsing. 10,000 requests/day -- the most generous of the
+    set, which makes it the natural fallback when VirusTotal runs dry."""
+    name = "safebrowsing"
+    needs_key = True
+    per_minute = 60
+    per_day = 10000
+
+    THREATS = ["MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE",
+               "POTENTIALLY_HARMFUL_APPLICATION"]
+
+    def lookup(self, host: str) -> dict:
+        self.limiter.wait()
+        body = json.dumps({
+            "client": {"clientId": "clienthoneypot", "clientVersion": "1.0"},
+            "threatInfo": {
+                "threatTypes": self.THREATS,
+                "platformTypes": ["ANY_PLATFORM"],
+                "threatEntryTypes": ["URL"],
+                "threatEntries": [{"url": f"http://{host}/"},
+                                  {"url": f"https://{host}/"}],
+            },
+        }).encode()
+
+        req = urllib.request.Request(
+            "https://safebrowsing.googleapis.com/v4/threatMatches:find"
+            f"?key={urllib.parse.quote(self.api_key)}",
+            data=body, method="POST")
+        req.add_header("Content-Type", "application/json")
+        req.add_header("User-Agent", USER_AGENT)
+        with urllib.request.urlopen(req, timeout=20,
+                                    context=_SSL_CONTEXT) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+
+        matches = data.get("matches") or []
+        kinds = sorted({m.get("threatType") for m in matches if m.get("threatType")})
+        return {"verdict": "malicious" if matches else "clean",
+                "score": len(matches),
+                "detail": {"matches": len(matches), "threat_types": kinds}}
+
+
+PROVIDERS = {p.name: p for p in (URLhaus, VirusTotal, OTX, ThreatFox,
+                                 URLScan, SafeBrowsing)}
 
 
 # ── enrichment ─────────────────────────────────────────────────────────────
@@ -242,6 +353,10 @@ class Enricher:
             provider = cls(self.keys.get(name))
             if provider.available():
                 self.providers.append(provider)
+
+    def status(self) -> list:
+        """Per-provider quota and cooldown, so a thin scan is explainable."""
+        return [p.status() for p in self.providers]
 
     def active(self) -> list:
         return [p.name for p in self.providers]
@@ -266,6 +381,8 @@ class Enricher:
         """
         results = []
         for provider in self.providers:
+            if not provider.available():
+                continue          # exhausted or unauthenticated: next one
             if not force:
                 row = self.db.conn.execute(
                     "SELECT * FROM intel_lookups WHERE host = ? AND provider = ?",
@@ -279,11 +396,26 @@ class Enricher:
                     continue
             try:
                 answer = provider.lookup(host)
+                provider.used_today += 1
+                provider.last_error = None
             except urllib.error.HTTPError as e:
-                answer = {"verdict": "error", "score": 0,
-                          "detail": {"http": e.code,
-                                     "hint": "quota or bad key" if e.code in (204, 401, 403, 429)
-                                             else "provider error"}}
+                if e.code in EXHAUSTED_CODES:
+                    # Out of quota, not a clean host. Stand this provider down
+                    # for an hour; the others carry the scan.
+                    provider.mark_exhausted(3600, f"HTTP {e.code} quota")
+                    answer = {"verdict": "error", "score": 0,
+                              "detail": {"http": e.code, "hint": "quota exhausted",
+                                         "cooldown": "1h"}}
+                elif e.code in AUTH_CODES:
+                    # A bad key never recovers on its own. Stand it down for
+                    # the session rather than burning every host on 401s.
+                    provider.mark_exhausted(86400, f"HTTP {e.code} auth")
+                    answer = {"verdict": "error", "score": 0,
+                              "detail": {"http": e.code,
+                                         "hint": "key rejected — check or replace it"}}
+                else:
+                    answer = {"verdict": "error", "score": 0,
+                              "detail": {"http": e.code, "hint": "provider error"}}
             except Exception as e:
                 answer = {"verdict": "error", "score": 0,
                           "detail": {"error": type(e).__name__}}

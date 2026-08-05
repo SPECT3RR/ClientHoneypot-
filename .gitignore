@@ -10,6 +10,10 @@ __pycache__/
 # sites we visit, i.e. attacker-controlled content. Recreated per session.
 config/profiles/
 
+# Feed API keys — one-time setup, never committed. intel_keys.py refuses to
+# write here if git is not ignoring it.
+config/intel_keys.json
+
 # Runtime-generated artifacts (recreated per session)
 telemetry/session.db
 reports/*.json
