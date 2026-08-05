@@ -37,9 +37,9 @@ $RuleGroup = "ClientHoneypot containment"
 $DockerSubnets = @("192.168.65.0/24", "172.16.0.0/12")
 
 # Ports a hunted session has no business reaching on the host.
-#   445/139/135  SMB and RPC — lateral movement and file access
+#   445/139/135  SMB and RPC - lateral movement and file access
 #   3389         RDP
-#   5985/5986    WinRM — remote command execution
+#   5985/5986    WinRM - remote command execution
 #   8000         the dashboard itself: it can clear verdicts and read the
 #                canary vault, so a compromised hunter must not reach it
 $BlockedPorts = @(135, 139, 445, 3389, 5985, 5986, 8000)
@@ -68,7 +68,7 @@ Write-Output "Blocked ports  : $($BlockedPorts -join ', ')"
 Write-Output ""
 
 if ($WhatIf) {
-    Write-Output "WhatIf — would create these inbound block rules:"
+    Write-Output "WhatIf - would create these inbound block rules:"
     foreach ($p in $BlockedPorts) {
         Write-Output "  block TCP/$p from $($DockerSubnets -join ',')"
     }
@@ -107,11 +107,9 @@ foreach ($port in $BlockedPorts) {
 Write-Output ""
 Write-Output "Created $created rule(s) in group '$RuleGroup'."
 Write-Output ""
-Write-Output "Verify from a container:"
-Write-Output "  docker run --rm --network hunt_net --entrypoint python \"
-Write-Output "    clienthoneypot/hunter:latest -c \"import socket; [print(p, 'REACHABLE' if (lambda: (socket.create_connection(('host.docker.internal',p),timeout=3).close(), True)[1])() else 'blocked') for p in (445,3389,8000)]\""
-Write-Output ""
-Write-Output "Ports 445/3389/8000 should read 'blocked' or time out."
-Write-Output ""
-Write-Output "This does NOT block the decoy on decoy_net - hunters reach it by"
-Write-Output "container DNS, which never traverses the host."
+Write-Output 'Verify from a container:'
+Write-Output '  From inside a hunt container, connecting to'
+Write-Output 'host.docker.internal on 445, 3389 or 8000 should now fail.'
+Write-Output ''
+Write-Output 'This does NOT block the decoy on decoy_net - hunters reach it by'
+Write-Output 'container DNS, which never traverses the host.'
