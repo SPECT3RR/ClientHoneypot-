@@ -1,0 +1,3 @@
+{'action': 'process', 'status': 'success', 'src_ip': '0.0.0.0', 'src_port': 22, 'server': 'ssh_server', 'dest_ip': '0.0.0.0', 'dest_port': 22}
+{'action': 'connection', 'src_ip': '172.17.0.1', 'src_port': 43708, 'server': 'ssh_server', 'dest_ip': '0.0.0.0', 'dest_port': 22}
+{'action': 'connection', 'src_ip': '172.17.0.1', 'src_port': 43720, 'server': 'ssh_server', 'dest_ip': '0.0.0.0', 'dest_port': 22}

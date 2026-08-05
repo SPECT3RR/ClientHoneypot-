@@ -1,0 +1,37 @@
+# qeeqbox/honeypots — the service side of the decoy.
+#
+# Real listeners on SSH, FTP, MySQL, Postgres, SMB, VNC, RDP and more,
+# configured with the credentials we planted in the hunted browser so an
+# attacker's stolen login actually succeeds and gets logged.
+#
+# Pure Python, no ELK and no JVM, which is why this fits on a 7.5 GB machine
+# where T-Pot could not.
+FROM python:3.11-slim
+
+# psutil and netifaces are C extensions with no wheels for this platform, so
+# python3-dev headers are required at build time -- slim ships none.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      gcc python3-dev libffi-dev libssl-dev \
+ && pip install --no-cache-dir honeypots \
+ && apt-get purge -y gcc python3-dev libffi-dev libssl-dev \
+ && apt-get autoremove -y \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /var/log/honeypots /etc/honeypots
+
+# Config is generated from the canary vault and mounted in, so a token pasted
+# into the dashboard becomes a working credential here.
+VOLUME ["/var/log/honeypots", "/etc/honeypots"]
+
+# Runs as root because the real ports (22, 21, 445, 3306) are privileged and
+# an attacker who finds SSH on 2222 knows it is a honeypot. The container is
+# on an internal-only network with no route to the host or LAN, which is where
+# the isolation comes from.
+# --termination-strategy signal is mandatory here. The default strategy calls
+# input(""), which raises EOFError immediately in a detached container with no
+# stdin, leaving the manager crashed even though the listener threads survive.
+ENTRYPOINT ["python", "-m", "honeypots", \
+            "--config", "/etc/honeypots/config.json", \
+            "--termination-strategy", "signal"]
+CMD ["--setup", "ssh,ftp,mysql,postgres,smb,telnet,vnc,rdp,redis"]

@@ -1,0 +1,87 @@
+{
+  "logs": "file,json",
+  "logs_location": "/var/log/honeypots",
+  "honeypots": {
+    "ssh": {
+      "port": 22,
+      "ip": "0.0.0.0",
+      "options": [
+        "capture_commands"
+      ],
+      "username": "corp_ssh",
+      "password": "Asteria-ssh-K3y!"
+    },
+    "ftp": {
+      "port": 21,
+      "ip": "0.0.0.0",
+      "options": [
+        "capture_commands"
+      ],
+      "username": "file_drop",
+      "password": "FtpDrop2026!"
+    },
+    "mysql": {
+      "port": 3306,
+      "ip": "0.0.0.0",
+      "options": [
+        "capture_commands"
+      ],
+      "username": "reporting_db",
+      "password": "Fake!ReportingP4ss"
+    },
+    "postgres": {
+      "port": 5432,
+      "ip": "0.0.0.0",
+      "options": [
+        "capture_commands"
+      ],
+      "username": "reporting_db",
+      "password": "Fake!ReportingP4ss"
+    },
+    "smb": {
+      "port": 445,
+      "ip": "0.0.0.0",
+      "options": [
+        "capture_commands"
+      ],
+      "username": "file_drop",
+      "password": "FtpDrop2026!"
+    },
+    "telnet": {
+      "port": 23,
+      "ip": "0.0.0.0",
+      "options": [
+        "capture_commands"
+      ],
+      "username": "svc_backup",
+      "password": "Asteria!2026"
+    },
+    "vnc": {
+      "port": 5900,
+      "ip": "0.0.0.0",
+      "options": [
+        "capture_commands"
+      ],
+      "username": "svc_backup",
+      "password": "Asteria!2026"
+    },
+    "rdp": {
+      "port": 3389,
+      "ip": "0.0.0.0",
+      "options": [
+        "capture_commands"
+      ],
+      "username": "svc_backup",
+      "password": "Asteria!2026"
+    },
+    "redis": {
+      "port": 6379,
+      "ip": "0.0.0.0",
+      "options": [
+        "capture_commands"
+      ],
+      "username": "svc_backup",
+      "password": "Asteria!2026"
+    }
+  }
+}

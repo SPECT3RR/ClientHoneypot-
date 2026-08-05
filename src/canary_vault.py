@@ -23,6 +23,11 @@ Placement policy decides where each lands:
   decoy_tier2      the file server. Fires only when a classified human
                    operator reaches the vault, so real tokens are not burned
                    on automated scanners.
+  decoy_services   a WORKING credential on the matching qeeqbox honeypot --
+                   an SSH key that opens 22, a DB password that opens 3306.
+                   Fires when the attacker actually tries the bait they stole,
+                   which is the strongest signal the platform produces because
+                   it proves the credential travelled.
 
 Every placement is stamped with the session id, so a callback months later
 still identifies the visit that planted it.
@@ -35,7 +40,7 @@ from pathlib import Path
 
 from verdict_db import VerdictDB
 
-PLACEMENTS = ("browser_profile", "decoy_tier1", "decoy_tier2")
+PLACEMENTS = ("browser_profile", "decoy_tier1", "decoy_tier2", "decoy_services")
 KINDS = ("aws_key", "dns_callback", "url_token", "tracking_pixel", "document",
          "ssh_key", "db_credential")
 
