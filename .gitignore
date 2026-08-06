@@ -7,19 +7,30 @@ __pycache__/
 
 # Browser profiles — NEVER commit these.
 # They hold cache, cookies, and service workers fetched from the malicious
-# sites we visit, i.e. attacker-controlled content. Recreated per session.
+# sites we visit, i.e. attacker-controlled content. Recreated per session,
+# and the bulk of the history bloat this repo was cleaned of.
 config/profiles/
 
 # Feed API keys — one-time setup, never committed. intel_keys.py refuses to
 # write here if git is not ignoring it.
 config/intel_keys.json
 
-# Runtime-generated artifacts (recreated per session)
-telemetry/session.db
-reports/*.json
-reports/*.jsonl
-reports/*.html
-screenshots/*/
+# Canary token config — holds an AWS-shaped canary credential unique to this
+# deployment. Committing it lets anyone see (and burn) the bait. The
+# .example template is tracked instead.
+config/canary_tokens.json
+
+# Runtime databases and event streams — recreated per run, and the verdict DB
+# holds the live canary vault, so it is state, not source.
+telemetry/*.db
+telemetry/*.jsonl
+telemetry/samples/
+*.quar
+
+# Other runtime-generated artifacts (recreated per session)
+reports/
+screenshots/
+logs/
 config/persona_snapshots/*.json
 decoy_app/honeytokens/*.txt
 decoy_app/honeytokens/*.csv
@@ -31,7 +42,3 @@ decoy_app/honeytokens/*.ovpn
 # Generated decoy service config: lists the credentials the decoy accepts.
 # Written into the container at deploy time; the on-disk copy is vestigial.
 config/honeypots/
-
-# Captured malware samples. Defanged on disk, but never in git regardless.
-telemetry/samples/
-*.quar

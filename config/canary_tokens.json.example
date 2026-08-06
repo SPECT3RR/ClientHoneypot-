@@ -1,0 +1,5 @@
+{
+    "_comment": "Generate a free AWS Canary Token at https://canarytokens.org and paste its credentials here, then save this file as canary_tokens.json (which is gitignored). When an attacker steals the bait and uses it, canarytokens.org alerts you instantly. These are decoy credentials by design — they grant no access — but keep your own token out of git so nobody can burn it.",
+    "AWS_ACCESS_KEY_ID": "AKIA_REPLACE_WITH_YOUR_CANARY_TOKEN",
+    "AWS_SECRET_ACCESS_KEY": "replace_with_your_canary_token_secret"
+}

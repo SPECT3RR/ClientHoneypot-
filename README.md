@@ -62,6 +62,37 @@ what to build or bring in next (see "Roadmap").
 - Python 3.10+
 - `pip install -r requirements.txt`
 - `playwright install chromium`
+- Docker (Docker Desktop on Windows/macOS, Docker Engine on Linux) for the
+  contained hunter and the decoy tiers
+
+### Platform — Linux and Windows
+
+The platform runs on both. Everything in `src/`, `dashboard/`, and
+`decoy_app/` is pure Python + Docker: memory sensing branches on the OS
+(`GlobalMemoryStatusEx` on Windows, `/proc/meminfo` on Linux), and every
+Docker call goes through `subprocess`, so nothing is shell-specific.
+
+The only OS-specific pieces are the helper scripts in `scripts/*.ps1`
+(firewall rule, service stop/resume) — **Windows-only**, and not required to
+run the system. On Linux the equivalent host-isolation is an `iptables`/`ufw`
+rule blocking the Docker bridge from host services; the decoys are already
+contained on an internal network regardless.
+
+The decoy images are built once per machine (rebuild on Ubuntu after cloning):
+
+```bash
+docker build -f docker/Dockerfile.honeypots -t clienthoneypot/decoy-services:latest .
+docker build -f docker/Dockerfile.decoy     -t clienthoneypot/decoy-web:latest .
+docker build -f docker/Dockerfile.cowrie    -t clienthoneypot/decoy-shell:latest .
+docker build -f docker/Dockerfile           -t clienthoneypot/hunter:latest .
+
+python scripts/deploy_decoy.py        # stand up all three decoys, contained + verified
+python src/decoy_telemetry.py         # covert telemetry + sample capture, host-side
+```
+
+Copy `config/canary_tokens.json.example` to `config/canary_tokens.json` and
+paste your own free token from canarytokens.org. See `OPERATING.md` for the
+decoy tiers, the covert Wazuh telemetry, sample capture, and the kill-chain map.
 
 ## Quick start
 
