@@ -61,12 +61,15 @@ ACTIONS = {
     "intervention.resolve": "resolved a blocked bot",
     "container.pause":      "paused other containers",
     "container.resume":     "resumed paused containers",
+    # a captured attacker payload leaving the store
+    "sample.retrieve":      "downloaded a captured malware sample",
 }
 
 # Actions that change recorded truth or reduce isolation. Called out so a
 # reviewer can find them without reading the whole log.
 SENSITIVE = {"triage.confirm", "triage.reject", "swarm.kill",
-             "intel.key.set", "intel.key.remove", "container.pause"}
+             "intel.key.set", "intel.key.remove", "container.pause",
+             "sample.retrieve"}
 
 
 class AuditLog:

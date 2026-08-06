@@ -70,3 +70,18 @@
 {"ts": 1786005702.026412, "actor": "operator", "source": "testclient", "action": "queue.add", "target": null, "detail": {"added": 1, "pending": 2}, "sensitive": false}
 {"ts": 1786005702.0500169, "actor": "operator", "source": "testclient", "action": "swarm.target", "target": null, "detail": {"requested": 0, "allowed": 0}, "sensitive": false}
 {"ts": 1786005702.333905, "actor": "operator", "source": "testclient", "action": "intel.key.set", "target": "virustotal", "detail": {}, "sensitive": true}
+{"ts": 1786005936.994452, "actor": "operator", "source": "testclient", "action": "queue.add", "target": null, "detail": {"added": 1, "pending": 1}, "sensitive": false}
+{"ts": 1786005937.0290582, "actor": "operator", "source": "testclient", "action": "swarm.target", "target": null, "detail": {"requested": 0, "allowed": 0}, "sensitive": false}
+{"ts": 1786005937.060059, "actor": "operator", "source": "testclient", "action": "swarm.kill", "target": null, "detail": {}, "sensitive": true}
+{"ts": 1786005937.0967617, "actor": "operator", "source": "testclient", "action": "canary.add", "target": "t", "detail": {"kind": "url_token", "placement": "browser_profile", "label": "t"}, "sensitive": false}
+{"ts": 1786005937.1287274, "actor": "operator", "source": "testclient", "action": "queue.add", "target": null, "detail": {"added": 1, "pending": 2}, "sensitive": false}
+{"ts": 1786005937.1560228, "actor": "operator", "source": "testclient", "action": "swarm.target", "target": null, "detail": {"requested": 0, "allowed": 0}, "sensitive": false}
+{"ts": 1786005937.3262315, "actor": "operator", "source": "testclient", "action": "intel.key.set", "target": "virustotal", "detail": {}, "sensitive": true}
+{"ts": 1786007678.6345618, "actor": "operator", "source": "testclient", "action": "sample.retrieve", "target": "9153ef82a1facdf4088fdd7c2ec835e47b9b20b305c854d6db45834ac884efc8", "detail": {}, "sensitive": true}
+{"ts": 1786007841.178992, "actor": "operator", "source": "testclient", "action": "queue.add", "target": null, "detail": {"added": 1, "pending": 1}, "sensitive": false}
+{"ts": 1786007841.2101202, "actor": "operator", "source": "testclient", "action": "swarm.target", "target": null, "detail": {"requested": 0, "allowed": 0}, "sensitive": false}
+{"ts": 1786007841.2502003, "actor": "operator", "source": "testclient", "action": "swarm.kill", "target": null, "detail": {}, "sensitive": true}
+{"ts": 1786007841.2943082, "actor": "operator", "source": "testclient", "action": "canary.add", "target": "t", "detail": {"kind": "url_token", "placement": "browser_profile", "label": "t"}, "sensitive": false}
+{"ts": 1786007841.321734, "actor": "operator", "source": "testclient", "action": "queue.add", "target": null, "detail": {"added": 1, "pending": 2}, "sensitive": false}
+{"ts": 1786007841.3589025, "actor": "operator", "source": "testclient", "action": "swarm.target", "target": null, "detail": {"requested": 0, "allowed": 0}, "sensitive": false}
+{"ts": 1786007842.056182, "actor": "operator", "source": "testclient", "action": "intel.key.set", "target": "virustotal", "detail": {}, "sensitive": true}

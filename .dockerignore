@@ -47,3 +47,8 @@ docs/
 needs_human_review.txt
 urls.txt
 targets.txt
+
+# Captured malware samples: never in any image. (telemetry/ already excluded,
+# named here so the intent survives if that line ever changes.)
+telemetry/samples/
+*.quar

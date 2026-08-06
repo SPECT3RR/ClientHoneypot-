@@ -352,6 +352,19 @@ def main(argv=None) -> int:
             pass       # not the main thread, or unsupported on this platform
 
     collector.start()
+
+    # Payload capture runs in the same process, watching the same containers
+    # from the host. One collector, two host-side channels: the log stream for
+    # activity, docker diff for files an attacker drops. Neither touches the
+    # container.
+    samples = None
+    try:
+        from sample_capture import SampleCollector
+        samples = SampleCollector(exporter=exporter, containers=watching)
+        samples.start()
+    except Exception as e:
+        print(f"[collector] sample capture off ({e})")
+
     print(f"[collector] watching {', '.join(watching)} from the host")
     print(f"[collector] findings -> {exporter.path}")
     print("[collector] nothing was installed in the decoy; ctrl-c to stop")
@@ -360,10 +373,13 @@ def main(argv=None) -> int:
         while True:
             time.sleep(30)
             s = collector.status()
+            extra = f" captured={samples.captured}" if samples else ""
             print(f"[collector] seen={s['records_seen']} "
-                  f"shipped={s['findings_shipped']}")
+                  f"shipped={s['findings_shipped']}{extra}")
     except KeyboardInterrupt:
         collector.stop()
+        if samples:
+            samples.stop()
         print(f"\n[collector] {json.dumps(collector.status(), default=str)}")
     return 0
 

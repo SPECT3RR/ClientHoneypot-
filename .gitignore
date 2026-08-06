@@ -31,3 +31,7 @@ decoy_app/honeytokens/*.ovpn
 # Generated decoy service config: lists the credentials the decoy accepts.
 # Written into the container at deploy time; the on-disk copy is vestigial.
 config/honeypots/
+
+# Captured malware samples. Defanged on disk, but never in git regardless.
+telemetry/samples/
+*.quar

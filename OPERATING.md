@@ -258,6 +258,39 @@ Check containment and disguise at any time:
 python scripts/deploy_decoy.py --verify
 ```
 
+### Covert sample capture
+
+The same collector process also captures any payload an attacker drops — an
+exploit kit, a dropper, a webshell, a plain executable. It watches each
+container's writable layer with `docker diff` and pulls new payloads out with
+`docker cp <c>:<path> -` (a tar to stdout), both of which run in the daemon
+**on the host**. Nothing runs inside the decoy, nothing is written into it, and
+`docker exec` is never used — so from the attacker's side there is no watcher
+process, no new file, and no sign a copy was taken.
+
+Captures land in `telemetry/samples/`, **XOR-defanged** (`.quar`): the bytes on
+disk are not a valid executable and cannot run, so a captured sample can never
+infect the machine analysing it. The dashboard's *Captured payloads* panel
+lists them; the download hands you the defanged `.quar`, which you un-defang
+deliberately inside a sandbox:
+
+```python
+from sample_capture import SampleStore
+open("sample.bin", "wb").write(SampleStore().unpack("<sha256>"))
+```
+
+Every download is audited as sensitive. The store is git- and docker-ignored —
+malware never reaches a repo or an image.
+
+### The Cyber Kill Chain map
+
+Every finding is stamped with its Lockheed Martin kill-chain stage, in the SIEM
+and on the dashboard's *Cyber Kill Chain* panel, which shows how far each
+attacker got: a captured executable puts them at **Installation**, a fired
+canary proves **Command & Control**, a honeytoken read is **Actions on
+Objectives**. "Furthest stage reached" is the one number that ranks one
+attacker against another.
+
 ### What is deliberately kept out of the decoy images
 
 `.gitignore` protects the repository; it has no effect on `docker build`,

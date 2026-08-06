@@ -37,7 +37,9 @@ VERSION = "1.0"
 # because it proves bait travelled to attacker infrastructure and came back.
 EVENTS = {
     "canary.fired":          (13, "Canary token used from attacker infrastructure"),
+    "sample.executable":     (13, "Executable payload captured from a decoy"),
     "decoy.planted_cred":    (13, "Planted credential used against a decoy service"),
+    "sample.captured":       (10, "File payload captured from a decoy"),
     "decoy.human_operator":  (12, "Human operator classified inside the decoy"),
     "compromise.critical":   (11, "Critical action of compromise observed"),
     "decoy.command":         (11, "Command executed inside a decoy service"),
@@ -60,6 +62,8 @@ EVENTS = {
 # internal vocabulary.
 TECHNIQUE = {
     "canary.fired": "T1078",             # Valid Accounts
+    "sample.executable": "T1105",        # Ingress Tool Transfer
+    "sample.captured": "T1105",
     "decoy.planted_cred": "T1078",       # Valid Accounts
     "compromise.critical": "T1203",      # Exploitation for Client Execution
     "compromise.high": "T1189",          # Drive-by Compromise
@@ -113,6 +117,16 @@ def build(event_type: str, **fields) -> dict:
     }
     if event_type in TECHNIQUE:
         event["threat"] = {"technique": {"id": TECHNIQUE[event_type]}}
+
+    # Stamp the Cyber Kill Chain stage so a SIEM rule (and the dashboard) can
+    # rank a finding by how deep in the attack it sits, not just its severity.
+    import killchain
+    stage = killchain.stage_for(event_type)
+    if stage:
+        event.setdefault("threat", {})["kill_chain_stage"] = stage
+        event["threat"].setdefault("kill_chain_index",
+                                   killchain.STAGE_INDEX[stage])
+
     event.update({k: v for k, v in fields.items() if v is not None})
     return event
 
@@ -294,6 +308,19 @@ class SiemExporter:
             return self.emit("decoy.command", command=text[:500], **common)
 
         return self.emit("decoy.connect", **common)
+
+    def sample(self, sha256, size, kind, container, path,
+               session_id=None, magic=None):
+        """A payload was captured off a decoy. An executable landing on our
+        system is the strongest single artefact after a fired canary: it is
+        the attacker's own tool, in our hands, and it puts them at Installation
+        on the kill chain."""
+        executable = kind in ("pe", "dll", "elf", "macho", "script", "msi",
+                              "ole", "jar")
+        event_type = "sample.executable" if executable else "sample.captured"
+        return self.emit(event_type, sha256=sha256, size=size,
+                         sample_type=kind, container=container,
+                         sample_path=path, magic=magic, session_id=session_id)
 
     def decoy_silent(self, container, reason):
         """The log stream stopped while the container was meant to be running.

@@ -39,6 +39,8 @@ import threatintel                             # noqa: E402
 import intel_keys                              # noqa: E402
 from audit import AuditLog                     # noqa: E402
 import siem                                    # noqa: E402
+import killchain                               # noqa: E402
+from sample_capture import SampleStore         # noqa: E402
 import urllib.request                          # noqa: E402
 
 DECOY_BASE = "http://127.0.0.1:8001"
@@ -57,6 +59,9 @@ AUDIT = AuditLog(DB)
 # Findings ship to a file a Wazuh agent tails. No network
 # dependency, so a manager being down cannot lose a verdict.
 SIEM = siem.SiemExporter(mode='jsonl')
+# Captured attacker payloads (defanged on disk) and the kill-chain map, both
+# read-only here — the capture itself runs in the collector process.
+SAMPLES = SampleStore()
 SUBSTRATE = substrate_mod.load()
 # Headed by default: a human cannot take over a headless browser, so running
 # headless silently makes the intervention queue unable to do its job.
@@ -295,6 +300,9 @@ async def index(request: Request):
         "audit_stats": AUDIT.stats(),
         "siem_status": SIEM.status(),
         "wazuh_config": siem.wazuh_agent_config(),
+        "samples": SAMPLES.records(25),
+        "killchain": killchain.from_siem_file(SIEM.path).all_summaries()[:12],
+        "killchain_stages": killchain.STAGES,
         "third_party": _third_party_view(20),
         "alerts": ALERTS[:40],
         "placements": PLACEMENTS,
@@ -333,6 +341,29 @@ async def kill_swarm(request: Request):
     AUDIT.record("swarm.kill", source=_client(request))
     alert("swarm", "Kill switch engaged — all workers stopping")
     return RedirectResponse("/", status_code=303)
+
+
+@app.get("/samples/{sha}")
+async def download_sample(request: Request, sha: str):
+    """Hand the operator a captured payload — DEFANGED.
+
+    What downloads is the XOR'd `.quar`, not a runnable binary: serving live
+    malware over the dashboard is how you infect the machine analysing it. The
+    operator un-defangs it deliberately inside a sandbox with the one-liner in
+    sample_capture (`SampleStore.unpack`). The retrieval is audited as
+    sensitive, since it is the point at which a real sample leaves the store.
+    """
+    import io
+    if not (len(sha) == 64 and all(c in "0123456789abcdef" for c in sha)):
+        return RedirectResponse("/", status_code=303)
+    path = SAMPLES.dir / f"{sha}.quar"
+    if not path.exists():
+        return RedirectResponse("/", status_code=303)
+    AUDIT.record("sample.retrieve", source=_client(request), target=sha)
+    data = path.read_bytes()
+    return StreamingResponse(
+        io.BytesIO(data), media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{sha}.quar"'})
 
 
 @app.post("/queue/add")

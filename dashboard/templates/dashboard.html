@@ -715,6 +715,82 @@
   </div>
 </div>
 
+<!-- ══ CAPTURE + KILL CHAIN ════════════════════════════════════════════ -->
+<style>
+  .kc-row{display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin:6px 0}
+  .kc-cell{font-size:10px;padding:3px 7px;border-radius:3px;white-space:nowrap;
+    border:1px solid var(--line,#333);color:var(--muted,#888)}
+  .kc-cell.hit{color:#fff;border-color:transparent;font-weight:600}
+  .kc-cell.s-reconnaissance.hit,.kc-cell.s-weaponization.hit,
+  .kc-cell.s-delivery.hit{background:#b58900}
+  .kc-cell.s-exploitation.hit,.kc-cell.s-installation.hit{background:#cb4b16}
+  .kc-cell.s-command_and_control.hit,
+  .kc-cell.s-actions_on_objectives.hit{background:#dc322f}
+  .kc-arrow{color:var(--muted,#666);font-size:10px}
+  .kc-sess{font-family:monospace;font-size:11px;color:var(--muted,#999);margin-top:10px}
+</style>
+<div class="band">
+  <h3>Threat capture &amp; kill chain</h3>
+  <div class="cols c2">
+
+    <div class="panel">
+      <h4>Captured payloads
+        <span class="sub">{{ samples|length }} on file &middot; defanged on disk</span></h4>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>type</th><th>path</th><th>where</th>
+            <th>sha256</th><th>size</th><th></th></tr></thead>
+          <tbody>
+          {% for s in samples %}
+            <tr>
+              <td><span class="tag compromised">{{ s.kind }}</span></td>
+              <td><span class="url">{{ s.path }}</span></td>
+              <td class="muted">{{ s.container }}</td>
+              <td class="muted" style="font-family:monospace">{{ s.sha256[:12] }}</td>
+              <td class="muted">{{ s.size }}b</td>
+              <td><a href="/samples/{{ s.sha256 }}" title="download defanged (.quar)">get</a></td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6" class="empty">no payloads captured yet</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="muted" style="font-size:11px;margin:9px 0 0">
+        Copied off a decoy from the host, never executed. Download is the
+        XOR-defanged <code>.quar</code>; un-defang inside a sandbox with
+        <code>SampleStore.unpack</code>. Every download is audited.
+      </p>
+    </div>
+
+    <div class="panel">
+      <h4>Cyber Kill Chain
+        <span class="sub">how far each attacker got</span></h4>
+      <div class="scroll">
+        {% for k in killchain %}
+          <div class="kc-sess">{{ k.session }}
+            &mdash; reached <strong>{{ k.furthest_label or 'nothing' }}</strong></div>
+          <div class="kc-row">
+            {% for st in k.stages %}
+              <span class="kc-cell s-{{ st.key }} {{ 'hit' if st.reached }}"
+                    title="{{ st.count }} finding(s)">{{ st.label }}{% if st.count > 1 %} &times;{{ st.count }}{% endif %}</span>
+              {% if not loop.last %}<span class="kc-arrow">&rsaquo;</span>{% endif %}
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="empty">no attack activity mapped yet</p>
+        {% endfor %}
+      </div>
+      <p class="muted" style="font-size:11px;margin:9px 0 0">
+        Lockheed Martin's seven stages. A captured executable puts an attacker
+        at <em>Installation</em>; a fired canary proves <em>Command &amp;
+        Control</em>. Built from the findings stream, same as Wazuh sees.
+      </p>
+    </div>
+
+  </div>
+</div>
+
 <!-- ══ SIEM + AUDIT ════════════════════════════════════════════════════ -->
 <div class="band">
   <h3>Export &amp; accountability</h3>
