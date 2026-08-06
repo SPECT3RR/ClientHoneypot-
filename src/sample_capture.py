@@ -118,6 +118,37 @@ def _xor(data: bytes) -> bytes:
     return bytes(b ^ key[i % len(key)] for i, b in enumerate(data))
 
 
+def docker_cp_file(container: str, path: str,
+                   max_bytes: int = MAX_SAMPLE_BYTES) -> tuple:
+    """Stream one file out of a container as a tar and return (bytes, error).
+
+    `docker cp <c>:<path> -` writes a tar to stdout from the daemon; no process
+    is created inside the container. When `path` is a directory the tar is the
+    whole tree, so only the member whose name is the file we asked for is
+    returned. Shared by the sample collector and the Cowrie ingest.
+    """
+    try:
+        out = subprocess.run(["docker", "cp", f"{container}:{path}", "-"],
+                             capture_output=True, timeout=60)
+    except Exception as e:
+        return None, f"cp {container}:{path}: {e}"
+    if out.returncode != 0 or not out.stdout:
+        return None, None
+    base = path.rstrip("/").rsplit("/", 1)[-1]
+    try:
+        with tarfile.open(fileobj=io.BytesIO(out.stdout)) as tar:
+            member = next((m for m in tar.getmembers()
+                           if m.name == base and m.isfile()), None)
+            if member is None:
+                return None, None            # a directory or symlink, not a file
+            if member.size > max_bytes:
+                return None, f"{container}:{path} is {member.size} bytes, over cap"
+            f = tar.extractfile(member)
+            return (f.read() if f else None), None
+    except tarfile.TarError as e:
+        return None, f"untar {container}:{path}: {e}"
+
+
 class SampleStore:
     """Where captured payloads live, defanged, on the host only."""
 
@@ -213,40 +244,13 @@ class SampleCollector:
         return paths
 
     def _pull(self, container: str, path: str) -> bytes:
-        """Stream one file out as a tar and return its bytes, or None.
-
-        `docker cp <c>:<path> -` writes a tar to stdout from the daemon; no
-        process is created inside the container. When `path` is a directory the
-        tar is the whole tree, so we take ONLY the member that is the file we
-        asked for -- matched by basename and required to be a regular file.
-        Without that check a changed directory (docker diff lists parent dirs
-        as changed) would pull an arbitrary legitimate binary from inside it.
-        """
-        try:
-            out = subprocess.run(["docker", "cp", f"{container}:{path}", "-"],
-                                 capture_output=True, timeout=60)
-        except Exception as e:
-            self.errors.append(f"cp {container}:{path}: {e}")
-            return None
-        if out.returncode != 0 or not out.stdout:
-            return None
-        base = path.rstrip("/").rsplit("/", 1)[-1]
-        try:
-            with tarfile.open(fileobj=io.BytesIO(out.stdout)) as tar:
-                member = next((m for m in tar.getmembers()
-                               if m.name == base and m.isfile()), None)
-                if member is None:
-                    return None          # a directory, or a symlink, not a file
-                if member.size > MAX_SAMPLE_BYTES:
-                    self.skipped_large += 1
-                    self.errors.append(
-                        f"{container}:{path} is {member.size} bytes, over cap")
-                    return None
-                f = tar.extractfile(member)
-                return f.read() if f else None
-        except tarfile.TarError as e:
-            self.errors.append(f"untar {container}:{path}: {e}")
-        return None
+        """Stream one file out as a tar and return its bytes, or None."""
+        data, err = docker_cp_file(container, path)
+        if err:
+            if "over cap" in err:
+                self.skipped_large += 1
+            self.errors.append(err)
+        return data
 
     # -- per-container pass --------------------------------------------------
 

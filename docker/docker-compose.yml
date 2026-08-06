@@ -63,6 +63,17 @@ services:
     image: clienthoneypot/decoy-services:latest
     profiles: ["manual"]          # never started by `up`
 
+  # Shell decoy (Cowrie): the attacker who used a stolen ssh credential lands
+  # in a real emulated shell here — and any file they upload or write is SAVED
+  # by sha256, which qeeqbox could not do. Built here, deployed by
+  # scripts/deploy_decoy.py (which needs --sysctl to bind port 22 non-root).
+  decoy-shell:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.cowrie
+    image: clienthoneypot/decoy-shell:latest
+    profiles: ["manual"]          # never started by `up`
+
   dashboard:
     build:
       context: ..

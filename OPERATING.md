@@ -237,6 +237,36 @@ Docker Desktop with the operator's own drive attached, and it gave them a
 writable path onto that drive. The decoys take their config by `docker cp` now
 and log to stdout instead.
 
+### The shell decoy (Cowrie) — where files actually get saved
+
+`deploy_decoy.py` also stands up a **high-interaction shell decoy** built on
+Cowrie (`docker/Dockerfile.cowrie`, image `clienthoneypot/decoy-shell`). This
+is the tier that captures *dynamically loaded* files: an attacker who used a
+stolen SSH credential lands in a real emulated shell as `asteria-app02`, and
+anything they **upload (scp/sftp) or write in-shell is saved by SHA256**, tied
+to the command and session. qeeqbox could not do this — it rejects uploads.
+
+Build it once (the deploy expects the image):
+
+```bash
+docker build -f docker/Dockerfile.cowrie -t clienthoneypot/decoy-shell:latest .
+```
+
+The stolen credential that works here comes from the canary vault (an `ssh_key`
+token in `decoy_services`), same as the service decoy. Its activity and saved
+payloads are read from the host by `src/cowrie_ingest.py` — Cowrie's own JSON
+log and downloads directory, pulled with `docker cp`, never `docker exec`. It
+runs inside the same `python src/decoy_telemetry.py` collector.
+
+Two honest limits:
+- **No egress**, by design — so a `wget`/`curl` of an *internet* payload can't
+  fetch (the URL is still logged as intel). Uploads and in-shell writes are
+  captured regardless. Fetching real remote payloads would need controlled
+  egress through the RBI DLP proxy — a separate, deliberate step.
+- Cowrie's emulated shell has **known behavioural tells** a skilled adversary
+  can fingerprint. That's true of every medium-interaction honeypot; the
+  un-fingerprintable alternative is a real contained shell (real RCE).
+
 ### Telemetry to Wazuh
 
 Nothing is installed in the decoy. It logs to stdout, Docker's log driver

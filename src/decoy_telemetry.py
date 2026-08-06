@@ -365,6 +365,18 @@ def main(argv=None) -> int:
     except Exception as e:
         print(f"[collector] sample capture off ({e})")
 
+    # The Cowrie shell decoy logs to its own file and saves dropped payloads to
+    # its own directory; read both from the host if it is running.
+    cowrie = None
+    try:
+        from cowrie_ingest import CowrieCollector, is_running, CONTAINER
+        if is_running(CONTAINER):
+            cowrie = CowrieCollector(exporter, vault=vault)
+            cowrie.start()
+            print(f"[collector] also reading the {CONTAINER} shell decoy")
+    except Exception as e:
+        print(f"[collector] cowrie ingest off ({e})")
+
     print(f"[collector] watching {', '.join(watching)} from the host")
     print(f"[collector] findings -> {exporter.path}")
     print("[collector] nothing was installed in the decoy; ctrl-c to stop")
@@ -380,6 +392,8 @@ def main(argv=None) -> int:
         collector.stop()
         if samples:
             samples.stop()
+        if cowrie:
+            cowrie.stop()
         print(f"\n[collector] {json.dumps(collector.status(), default=str)}")
     return 0
 

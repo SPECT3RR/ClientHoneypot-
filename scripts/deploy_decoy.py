@@ -253,6 +253,74 @@ def deploy_web() -> list:
     return steps
 
 
+SHELL_CONTAINER = "decoy_shell"
+SHELL_IMAGE = "clienthoneypot/decoy-shell:latest"
+SHELL_HOSTNAME = "asteria-app02"
+SHELL_USERDB = "/cowrie/cowrie-git/etc/userdb.txt"
+
+
+def build_userdb(vault) -> str:
+    """Cowrie userdb.txt from the canary vault: a stolen ssh credential works.
+
+    `user:x:pass` accepts that exact pair; `user:x:*` accepts any password.
+    The permissive root/admin lines lure opportunistic brute force too -- and
+    every login, planted or brute, is captured either way.
+    """
+    lines = []
+    if vault:
+        for t in vault.all():
+            if (t.get("placement") == "decoy_services"
+                    and t.get("kind") == "ssh_key" and t.get("value")):
+                label = (t.get("label") or "svc").replace("-", "_")
+                user = "".join(c for c in label if c.isalnum() or c == "_") or "svc"
+                lines.append(f"{user}:x:{t['value']}")
+    lines += ["root:x:*", "admin:x:*"]
+    return "\n".join(lines) + "\n"
+
+
+def deploy_shell() -> list:
+    """The high-interaction shell decoy (Cowrie).
+
+    A stolen ssh credential lands here in a real emulated shell, and any file
+    the attacker uploads or writes is saved by sha256 -- which is exactly what
+    qeeqbox could not do. Cowrie refuses to run as root, so it runs non-root
+    with a sysctl that lets it bind port 22; presenting on 2222 would announce
+    the honeypot. Config is baked into the image; the accepted credentials are
+    copied in from the vault, no mount.
+    """
+    steps = []
+    subprocess.run(["docker", "rm", "-f", SHELL_CONTAINER], capture_output=True)
+
+    try:
+        from canary_vault import CanaryVault
+        from verdict_db import VerdictDB
+        vault = CanaryVault(VerdictDB())
+    except Exception as e:
+        print(f"  ! no canary vault ({e}); shell accepts only brute-force creds")
+        vault = None
+    userdb = build_userdb(vault)
+    seeded = sum(1 for ln in userdb.splitlines() if ln and not ln.endswith(":x:*"))
+
+    docker("create", "--name", SHELL_CONTAINER,
+           "--network", NETWORK,
+           "--hostname", SHELL_HOSTNAME,
+           # Cowrie is non-root; this lets uid 999 bind the real port 22.
+           "--sysctl", "net.ipv4.ip_unprivileged_port_start=0",
+           "--restart", "unless-stopped",
+           SHELL_IMAGE)
+    steps.append(f"shell decoy on {NETWORK} as {SHELL_HOSTNAME}")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        p = Path(tmp) / "userdb.txt"
+        p.write_text(userdb, encoding="utf-8")
+        docker("cp", str(p), f"{SHELL_CONTAINER}:{SHELL_USERDB}")
+    steps.append(f"credentials copied in ({seeded} seeded from the vault)")
+
+    docker("start", SHELL_CONTAINER)
+    steps.append("started (Cowrie: emulated shell, saves dropped files)")
+    return steps
+
+
 # ── verification ───────────────────────────────────────────────────────────
 
 EGRESS_PROBES = {
@@ -470,6 +538,58 @@ def verify_disguise(container: str) -> tuple:
     return ok, findings
 
 
+def _grab_banner(host: str, port: int = 22) -> str:
+    """Read a service banner from a throwaway container ON decoy_net.
+
+    From the host there is no route in (the network is internal), so the probe
+    has to run inside the network, the same place a hunted session lives."""
+    src = (f"import socket\n"
+           f"s=socket.create_connection(('{host}',{port}),timeout=6)\n"
+           f"print(s.recv(80).decode('utf-8','replace').strip())")
+    out = subprocess.run(
+        ["docker", "run", "--rm", "--network", NETWORK,
+         "python:3.11-slim", "python", "-c", src],
+        capture_output=True, text=True, timeout=90)
+    return out.stdout.strip()
+
+
+def verify_shell(container: str = SHELL_CONTAINER) -> bool:
+    """The shell decoy verifies differently: an attacker never reaches its real
+    filesystem (the SSH shell is emulated), so the disguise is the SSH-visible
+    surface, and the Cowrie image has no `sh` to exec a probe into anyway."""
+    print(f"\nVerifying {container} (high-interaction shell).\n")
+    ok = True
+
+    print("Containment")
+    nets = subprocess.run(
+        ["docker", "inspect", container, "--format",
+         "{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}"],
+        capture_output=True, text=True, timeout=20).stdout.split()
+    if NETWORK in nets and network_is_internal(NETWORK):
+        print(f"  ok    on {NETWORK}, which is internal — no egress "
+              f"(proven by the other decoys' probes above)")
+    else:
+        ok = False
+        print(f"  FAIL  not on an internal network: {nets}")
+
+    print("\nDisguise — what a scanner sees")
+    banner = _grab_banner(SHELL_HOSTNAME, 22)
+    if banner and "OpenSSH_8" in banner and "cowrie" not in banner.lower():
+        print(f"  ok    SSH banner reads as a patched server: {banner}")
+    else:
+        ok = False
+        print(f"  FAIL  SSH banner: {banner!r}")
+    print("  note  Cowrie's emulated shell has known behavioural tells a")
+    print("        skilled adversary can fingerprint — true of every")
+    print("        medium-interaction honeypot. The un-fingerprintable")
+    print("        alternative is a real contained shell (real RCE).")
+
+    print()
+    print("PASS  contained; a stolen credential works and dropped files are saved."
+          if ok else "FAIL  see above.")
+    return ok
+
+
 def verify(container: str = SVC_CONTAINER) -> bool:
     print(f"\nVerifying {container} the way an attacker inside it would.\n")
     print("Containment - can the decoy reach anything?")
@@ -500,7 +620,8 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     if args.verify:
-        return 0 if (verify() and verify(WEB_CONTAINER)) else 1
+        return 0 if (verify() and verify(WEB_CONTAINER)
+                     and verify_shell()) else 1
 
     internal = not args.expose_loopback
     if not internal:
@@ -512,12 +633,14 @@ def main(argv=None) -> int:
         print(f"          {step}")
     for step in deploy_web():
         print(f"          {step}")
+    for step in deploy_shell():
+        print(f"          {step}")
 
     import time
-    time.sleep(6)
-    ok = verify() and verify(WEB_CONTAINER)
+    time.sleep(8)
+    ok = verify() and verify(WEB_CONTAINER) and verify_shell()
 
-    print("\nCollect telemetry with:")
+    print("\nCollect telemetry + capture with:")
     print("    python src/decoy_telemetry.py")
     return 0 if ok else 1
 

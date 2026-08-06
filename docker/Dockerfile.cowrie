@@ -1,0 +1,37 @@
+# High-interaction shell decoy, built on Cowrie.
+#
+# WHY COWRIE
+# ----------
+# qeeqbox emulates protocols and logs credentials, but it does not give the
+# attacker a real shell and it does not persist an uploaded file, so a payload
+# dropped there vanishes. Cowrie is the industry-standard medium-interaction
+# SSH honeypot whose core feature is exactly what we were missing: a full
+# emulated shell where the attacker can wget/curl/scp/sftp a file, and Cowrie
+# SAVES it — by sha256, tied to the command and the session.
+#
+# WHAT THE ATTACKER SEES
+# ----------------------
+# The SSH session is an EMULATED shell (Python/Twisted), not /bin/sh in this
+# container. So the attacker never touches the real filesystem here — the
+# "cowrie" paths in this image are invisible to them, and disguise is about the
+# SSH banner and hostname, set in cowrie.cfg. The honest ceiling: Cowrie's
+# emulated shell has known behavioural tells a skilled adversary can fingerprint
+# (canned command output, fake-FS quirks). That is a property of every
+# medium-interaction honeypot; the un-fingerprintable alternative is a real
+# contained shell, which is real RCE.
+#
+# CONTAINMENT
+# -----------
+# Runs on the internal decoy_net with no route off the host (deploy_decoy.py).
+# Consequence: Cowrie can only FETCH a wget/curl payload from hosts reachable on
+# that network, not from the internet — a deliberate trade of wget-capture for
+# no egress. Uploads (scp/sftp) and in-shell writes are captured regardless,
+# and the attempted download URL is logged as intel even when the fetch cannot
+# leave. Controlled egress for real payload fetch is a separate, deliberate step
+# (route it through the RBI DLP proxy), never a side effect of running this.
+FROM cowrie/cowrie:latest
+
+# Our config overrides. userdb.txt (the accepted credentials) is generated from
+# the canary vault and copied in at deploy time, so a token pasted into the
+# dashboard becomes a working login here.
+COPY docker/cowrie/cowrie.cfg /cowrie/cowrie-git/etc/cowrie.cfg
