@@ -258,6 +258,42 @@ Check containment and disguise at any time:
 python scripts/deploy_decoy.py --verify
 ```
 
+### What is deliberately kept out of the decoy images
+
+`.gitignore` protects the repository; it has no effect on `docker build`,
+which sends the whole directory as build context regardless. `.dockerignore`
+is the only thing keeping these out of an attacker-facing image, and before it
+existed the decoy shipped with live threat-feed API keys and the canary bait
+list inside it:
+
+| Excluded | Why |
+|---|---|
+| `config/intel_keys.json` | working VirusTotal / Safe Browsing / abuse.ch keys |
+| `config/canary_tokens.json` | the bait list — reading it tells them what to avoid |
+| `config/honeypots/` | the logins the decoy accepts |
+| `telemetry/`, `reports/` | prior sessions and collected intelligence |
+| `tests/` | describes every detection rule and threshold |
+
+The web decoy also has its **own** minimal image (`docker/Dockerfile.decoy`)
+rather than the hunter image, which carries all 44 modules. It gets the four
+it imports, with comments and docstrings stripped — the code is unremarkable,
+but the commentary explained the bot/human strategy in plain English.
+
+The service library is vendored as `filesync` at build time, so
+`site-packages`, `pip list` and the startup banner do not name it either.
+
+**Consequences to remember**
+
+- The decoys build from images now, so **code changes need a rebuild** — there
+  is no mount to pick them up:
+  ```bash
+  docker build -f docker/Dockerfile.decoy -t clienthoneypot/decoy-web:latest .
+  ```
+- `src/decoy_services.CONFIG_SECTION` must match `ARG PKG` in
+  `docker/Dockerfile.honeypots`. If they drift, the config section is not
+  found, **every service silently binds a random high port**, and the log
+  still reports that everything is fine. The build and a test both assert it.
+
 ---
 
 ## 11. Threat feeds
