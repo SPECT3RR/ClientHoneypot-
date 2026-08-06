@@ -1,12 +1,29 @@
-# qeeqbox/honeypots — the service side of the decoy.
+# The service side of the decoy: real SSH, FTP, MySQL, Postgres, SMB, VNC,
+# RDP and Telnet listeners, configured with the credentials we planted in the
+# hunted browser so an attacker's stolen login actually succeeds and is logged.
 #
-# Real listeners on SSH, FTP, MySQL, Postgres, SMB, VNC, RDP and more,
-# configured with the credentials we planted in the hunted browser so an
-# attacker's stolen login actually succeeds and gets logged.
+# Built on qeeqbox/honeypots. Pure Python, no ELK and no JVM, which is why it
+# fits on a 7.5 GB machine where T-Pot could not.
 #
-# Pure Python, no ELK and no JVM, which is why this fits on a 7.5 GB machine
-# where T-Pot could not.
+# VENDORED UNDER ANOTHER NAME
+# ---------------------------
+# `pip install honeypots` leaves the library at site-packages/honeypots, a
+# matching .dist-info, and an entry in `pip list`. The process name and config
+# path were already disguised, but any of those three answers the only
+# question an attacker in here is really asking. `ls site-packages` is not a
+# sophisticated attack.
+#
+# So the package is renamed on disk to `filesync` and its internal absolute
+# imports are rewritten to match. The rename is mechanical and total: the
+# directory, the imports, the distribution metadata, and the compiled bytecode
+# caches, which embed the original source path and would otherwise give it
+# straight back.
+#
+# This is a real rename, not a symlink or an alias -- a symlink would show the
+# original name in `ls -l` and defeat the point.
 FROM python:3.11-slim
+
+ARG PKG=filesync
 
 # psutil and netifaces are C extensions with no wheels for this platform, so
 # python3-dev headers are required at build time -- slim ships none.
@@ -18,20 +35,68 @@ RUN apt-get update \
  && apt-get autoremove -y \
  && rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p /var/log/honeypots /etc/honeypots
+# Rename the package and rewrite every reference to it.
+#
+# The word boundary in the sed pattern matters. Without it this also rewrites
+# "honeypots" inside longer identifiers and log strings; with it, only the
+# module name is touched. Bytecode caches are removed rather than rewritten
+# because a .pyc records the absolute path of the .py it was compiled from.
+# The rename is intentionally blanket rather than import-only. It also strips
+# the project's name out of the strings the program prints -- the banner
+# otherwise logs github.com/qeeqbox/honeypots on startup, which is a louder
+# tell than the directory ever was.
+#
+# The singular is renamed to `filesvc` rather than to something readable like
+# `service`, because __main__.py already has a local named `service` and a
+# collision inside one scope would be a real bug rather than a cosmetic one.
+#
+# The one thing this must not silently break: the package looks up its own
+# config section with the string literal "honeypots", so that key is renamed
+# too. src/decoy_services.CONFIG_SECTION has to match, or the section is not
+# found and every service falls back to a random high port while still
+# reporting that everything is fine. The build asserts it here rather than
+# leaving it to be discovered by a connection refused.
+COPY docker/vendor_rename.py /tmp/vendor_rename.py
+RUN set -eux; \
+    SP="$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"; \
+    cd "$SP"; \
+    mv honeypots "$PKG"; \
+    rm -rf honeypots-*.dist-info; \
+    python /tmp/vendor_rename.py "$SP/$PKG" "$PKG"; \
+    rm -f /tmp/vendor_rename.py; \
+    python -c "import $PKG"; \
+    ! python -c "import honeypots" 2>/dev/null; \
+    grep -q "config_data\[\"$PKG\"\]" "$PKG/__main__.py"; \
+    ! grep -rqi "qeeqbox\|honeypot" "$PKG"
 
-# Config is generated from the canary vault and mounted in, so a token pasted
-# into the dashboard becomes a working credential here.
-VOLUME ["/var/log/honeypots", "/etc/honeypots"]
+# Dependencies can name it too. scapy (pulled in for the sniffer we do not
+# use) ships a dissector for Sebek, an old honeypot data-collection kernel
+# module, and its docstring is the one remaining hit for `grep -ri honeypot /`.
+# scapy.contrib modules are only ever imported explicitly, so dropping this one
+# is safe -- verified by importing scapy afterwards.
+RUN set -eux; \
+    SP="$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"; \
+    rm -f "$SP"/scapy/contrib/sebek.py \
+          "$SP"/scapy/contrib/__pycache__/sebek.*.pyc; \
+    python -c "import scapy.all"; \
+    python -c "import filesync"; \
+    ! grep -rli "honeypot\|qeeqbox" "$SP" /etc /var 2>/dev/null | grep -q .
 
+# Plausible paths for a file-sync daemon. Nothing here names the project.
+RUN mkdir -p /etc/filesyncd /var/lib/filesync
+
+# Config is written in by `docker cp` at deploy time rather than mounted: a
+# mount is visible in /proc/mounts and ours announced the host's drive letter.
+# See scripts/deploy_decoy.py.
+#
 # Runs as root because the real ports (22, 21, 445, 3306) are privileged and
-# an attacker who finds SSH on 2222 knows it is a honeypot. The container is
-# on an internal-only network with no route to the host or LAN, which is where
-# the isolation comes from.
-# --termination-strategy signal is mandatory here. The default strategy calls
-# input(""), which raises EOFError immediately in a detached container with no
-# stdin, leaving the manager crashed even though the listener threads survive.
-ENTRYPOINT ["python", "-m", "honeypots", \
-            "--config", "/etc/honeypots/config.json", \
+# an attacker who finds SSH on 2222 knows it is a honeypot. Isolation comes
+# from the internal-only network, which has no route to the host or the LAN.
+#
+# --termination-strategy signal is mandatory. The default calls input(""),
+# which raises EOFError immediately in a detached container with no stdin,
+# leaving the manager crashed even though the listener threads survive.
+ENTRYPOINT ["python", "-m", "filesync", \
+            "--config", "/etc/filesyncd/config.json", \
             "--termination-strategy", "signal"]
 CMD ["--setup", "ssh,ftp,mysql,postgres,smb,telnet,vnc,rdp,redis"]

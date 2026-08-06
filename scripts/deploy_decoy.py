@@ -56,19 +56,16 @@ SVC_HOSTNAME = "asteria-fs01"
 
 SERVICES = "ssh,ftp,mysql,postgres,smb,telnet,vnc,rdp,redis"
 
-# `python -m honeypots --config /etc/honeypots/config.json` is the loudest
-# tell in the whole container: the word is in every process line and every
-# path, and one `cat /proc/self/status`-grade look ends the engagement.
+# `python -m honeypots --config /etc/honeypots/config.json` was the loudest
+# tell in the container: the word appeared in every process line and every
+# path. The process now reads as a Python daemon on a file server, which is
+# what the host is pretending to be.
 #
-# So the honeypot is started through a launcher with a mundane name and its
-# config lives at a mundane path. The process reads as a Python daemon on a
-# file server, which is what the host is pretending to be.
-#
-# This raises the bar; it does not clear it. pip leaves the package itself at
-# site-packages/honeypots, and an attacker who goes looking there will find
-# it. Hiding that means vendoring the library under another name -- a real
-# piece of work, and worth doing before this is exposed to skilled targets.
+# The library itself is vendored as `filesync` at build time (see
+# docker/Dockerfile.honeypots), so site-packages, the distribution metadata
+# and `pip list` do not name it either.
 PROC_NAME = "filesyncd"
+PKG_NAME = "filesync"
 LAUNCHER = f"/usr/sbin/{PROC_NAME}"
 CONFIG_PATH = f"/etc/{PROC_NAME}/config.json"
 
@@ -79,7 +76,7 @@ import sys
 
 sys.argv = ["{PROC_NAME}", "--config", "{CONFIG_PATH}",
             "--termination-strategy", "signal", "--setup", "{SERVICES}"]
-runpy.run_module("honeypots", run_name="__main__")
+runpy.run_module("{PKG_NAME}", run_name="__main__")
 '''
 
 
@@ -140,10 +137,12 @@ def deploy_services(internal: bool = True) -> list:
     steps = []
     subprocess.run(["docker", "rm", "-f", SVC_CONTAINER], capture_output=True)
 
+    from decoy_services import CONFIG_SECTION
     config = build_service_config()
-    seeded = sum(1 for s in config["honeypots"].values()
+    services = config[CONFIG_SECTION]
+    seeded = sum(1 for s in services.values()
                  if s.get("password") != "Asteria!2026")
-    steps.append(f"config rendered: {len(config['honeypots'])} services, "
+    steps.append(f"config rendered: {len(services)} services, "
                  f"{seeded} seeded from the vault")
     assert config["logs"].startswith("terminal"), \
         "config must log to stdout or there is nothing to collect out of band"
@@ -184,7 +183,11 @@ def deploy_services(internal: bool = True) -> list:
 
 
 WEB_CONTAINER = "decoy"
-WEB_IMAGE = "clienthoneypot/hunter:latest"
+# Its own minimal image, not the hunter image. That one carries all 44 src
+# modules, the dashboard and config/ -- i.e. the bot/human classifier, the
+# canary design and the collection scheme -- into a container an attacker can
+# stand in. See docker/Dockerfile.decoy.
+WEB_IMAGE = "clienthoneypot/decoy-web:latest"
 WEB_HOSTNAME = "asteria-portal"
 WEB_PROC = "portald"
 
@@ -199,6 +202,19 @@ runpy.run_path("/app/decoy_app/app.py", run_name="__main__")
 '''
 
 
+def _canary_env() -> dict:
+    """Canary values from the host's config, for the decoy's environment."""
+    path = ROOT / "config" / "canary_tokens.json"
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return {k: v for k, v in data.items()
+            if k.startswith("AWS_") and isinstance(v, str) and v}
+
+
 def deploy_web() -> list:
     """The web decoy, with its host mount removed.
 
@@ -210,13 +226,21 @@ def deploy_web() -> list:
     steps = []
     subprocess.run(["docker", "rm", "-f", WEB_CONTAINER], capture_output=True)
     inner = f"rm -f /.dockerenv; exec python3 /usr/sbin/{WEB_PROC}"
-    docker("create", "--name", WEB_CONTAINER,
-           "--network", NETWORK,
-           "--hostname", WEB_HOSTNAME,
-           "--restart", "unless-stopped",
-           "-e", "CH_SUBSTRATE=docker",
-           "--entrypoint", "sh",
-           WEB_IMAGE, "-c", inner)
+
+    args = ["create", "--name", WEB_CONTAINER,
+            "--network", NETWORK,
+            "--hostname", WEB_HOSTNAME,
+            "--restart", "unless-stopped",
+            "-e", "CH_SUBSTRATE=docker"]
+
+    # The real canarytokens.org AWS key, handed over at deploy time rather
+    # than baked in. Without this the decoy silently falls back to a random
+    # key that fires nowhere, and the bait stops working with no error.
+    for name, value in _canary_env().items():
+        args += ["-e", f"{name}={value}"]
+
+    args += ["--entrypoint", "sh", WEB_IMAGE, "-c", inner]
+    docker(*args)
 
     with tempfile.TemporaryDirectory() as tmp:
         launcher = Path(tmp) / "launcher.py"
@@ -341,6 +365,94 @@ def verify_disguise(container: str) -> tuple:
         findings.append(f"          {naming[0][:88]}")
     else:
         findings.append("  ok    no process or path names the honeypot software")
+
+    # What is on disk. The process list can be clean while site-packages,
+    # `pip list` and our own source all answer the same question.
+    probe = (
+        'python3 - <<"EOF"\n'
+        'import glob, importlib.util, json, os\n'
+        'out = {}\n'
+        'out["pkg_importable"] = importlib.util.find_spec("honeypots") is not None\n'
+        'hits = []\n'
+        'for root in ("/usr/local/lib", "/usr/lib", "/app", "/etc", "/opt"):\n'
+        '    for dirpath, dirnames, filenames in os.walk(root):\n'
+        '        for n in list(dirnames) + list(filenames):\n'
+        '            low = n.lower()\n'
+        '            if "honeypot" in low or "qeeqbox" in low:\n'
+        '                hits.append(os.path.join(dirpath, n))\n'
+        '        # Names are not enough: the last hit in this container was a\n'
+        '        # docstring inside a dependency, not a filename.\n'
+        '        for n in filenames:\n'
+        '            p = os.path.join(dirpath, n)\n'
+        '            try:\n'
+        '                with open(p, "rb") as fh:\n'
+        '                    blob = fh.read(200000).lower()\n'
+        '            except OSError:\n'
+        '                continue\n'
+        '            if b"honeypot" in blob or b"qeeqbox" in blob:\n'
+        '                hits.append(p)\n'
+        '        if len(hits) > 12: break\n'
+        'out["named_paths"] = sorted(set(hits))[:6]\n'
+        'secrets = [p for p in ("/app/config/intel_keys.json",\n'
+        '                       "/app/config/canary_tokens.json")\n'
+        '           if os.path.exists(p)]\n'
+        'out["secrets"] = secrets\n'
+        'playbook = [p for p in ("/app/src/canary_vault.py",\n'
+        '                        "/app/src/decoy_telemetry.py",\n'
+        '                        "/app/src/threat_scorer.py",\n'
+        '                        "/app/src/threat_detection.py",\n'
+        '                        "/app/src/compromise_detector.py",\n'
+        '                        "/app/src/siem.py", "/app/src/intel_keys.py",\n'
+        '                        "/app/dashboard", "/app/tests")\n'
+        '            if os.path.exists(p)]\n'
+        'out["playbook"] = playbook\n'
+        'out["gate"] = os.path.exists("/app/src/operator_classifier.py")\n'
+        'print(json.dumps(out))\n'
+        'EOF\n')
+    raw = subprocess.run(["docker", "exec", container, "sh", "-c", probe],
+                         capture_output=True, text=True, timeout=120).stdout
+    line = next((l for l in raw.splitlines() if l.startswith("{")), None)
+    if line:
+        disk = json.loads(line)
+        if disk["pkg_importable"] or disk["named_paths"]:
+            ok = False
+            findings.append("  FAIL  the honeypot library is findable on disk:")
+            for p in disk["named_paths"][:3]:
+                findings.append(f"          {p}")
+            if disk["pkg_importable"]:
+                findings.append("          `import honeypots` succeeds")
+        else:
+            findings.append("  ok    nothing on disk names the honeypot library")
+
+        if disk["secrets"]:
+            ok = False
+            findings.append(f"  FAIL  secrets in the image: "
+                            f"{', '.join(disk['secrets'])}")
+        else:
+            findings.append("  ok    no threat-feed keys or bait list in the image")
+
+        if disk["playbook"]:
+            ok = False
+            findings.append(f"  FAIL  our own detection logic is readable here: "
+                            f"{', '.join(disk['playbook'][:3])}")
+        else:
+            findings.append("  ok    no scoring, canary, SIEM or console code "
+                            "in the image")
+
+        if disk.get("gate"):
+            # Not a failure, and not something that can be fixed by moving it:
+            # the decoy gates tier-2 access on a live bot/human decision, so
+            # the test has to run here. The canary lookup could move to the
+            # host because it is after-the-fact; this cannot.
+            #
+            # It is the one strategic disclosure left. Someone who reads it
+            # learns which behaviours we score and can rehearse against them.
+            # Worth knowing, and an argument for keeping the weights in config
+            # rather than in code if this ever faces a determined adversary.
+            findings.append("  note  operator_classifier.py present (the live "
+                            "bot/human gate must run here)")
+    else:
+        findings.append("  ??    on-disk probe did not run")
 
     # Docker's default hostname is the short container id: 12 hex characters.
     # Testing the length alone is wrong -- a good fake hostname can be twelve

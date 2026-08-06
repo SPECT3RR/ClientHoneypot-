@@ -50,7 +50,17 @@ DEFAULT_PORTS = {
 DEFAULT_SERVICES = ["ssh", "ftp", "mysql", "postgres", "smb", "telnet",
                     "vnc", "rdp", "redis"]
 
-LOG_DIR = "/var/log/honeypots"
+# qeeqbox mkdir -p's this path at startup even when logging to stdout, so a
+# path naming the software would materialise inside the container regardless.
+LOG_DIR = "/var/lib/filesync"
+
+# The service package is vendored under a neutral name at build time (see
+# docker/Dockerfile.honeypots), and the rename is mechanical, so the string
+# literal it uses to look up its own config section moves with it. This must
+# match that name or the section is not found and every service silently
+# falls back to a RANDOM high port -- the listeners come up, the log says
+# "Everything looks good!", and nothing answers on 22 or 21.
+CONFIG_SECTION = "filesync"
 
 
 def build_config(vault, services: list = None,
@@ -106,7 +116,7 @@ def build_config(vault, services: list = None,
     return {
         "logs": "terminal,json",
         "logs_location": log_dir,
-        "honeypots": honeypots,
+        CONFIG_SECTION: honeypots,
     }
 
 

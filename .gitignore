@@ -27,3 +27,7 @@ decoy_app/honeytokens/*.ovpn
 
 # Playwright
 /ms-playwright/
+
+# Generated decoy service config: lists the credentials the decoy accepts.
+# Written into the container at deploy time; the on-disk copy is vestigial.
+config/honeypots/

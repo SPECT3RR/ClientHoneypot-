@@ -18,7 +18,10 @@ COPY src/ ./src/
 COPY decoy_app/ ./decoy_app/
 COPY dashboard/ ./dashboard/
 COPY config/ ./config/
-COPY tests/ ./tests/
+# No tests/. .dockerignore excludes them, and the suite documents every
+# detection rule and threshold the platform has -- nothing that hunts needs
+# it. Secrets (config/intel_keys.json, config/canary_tokens.json) are excluded
+# there too; they were being baked in here and shipped into the decoy.
 
 ENV PYTHONUNBUFFERED=1
 

@@ -1,0 +1,66 @@
+# Web decoy — the fake corporate portal an attacker lands on.
+#
+# WHY THIS IS NOT THE HUNTER IMAGE
+# --------------------------------
+# It used to be. That image is built to hunt, so it carries the whole project:
+# 44 modules under /app/src, the dashboard, the tests, and config/. An
+# attacker who reached code execution here could read all of it, and what they
+# would read is our playbook:
+#
+#   operator_classifier.py  exactly how we separate bots from humans, which is
+#                           the one thing a decoy must not disclose -- knowing
+#                           the test means passing it
+#   canary_vault.py         how bait is minted, placed and attributed
+#   decoy_telemetry.py      the out-of-band collection scheme itself, in prose
+#   threat_scorer.py        every signal, weight and threshold
+#   config/canary_tokens.json   the bait list, so they know what to avoid
+#   config/intel_keys.json      live threat-feed API keys
+#
+# A decoy that ships its own detection logic to the people it is detecting is
+# not a decoy. This image carries the four modules the portal actually imports
+# and nothing else, on a plain python:3.11-slim base with no Playwright, no
+# Chromium and no browser tooling to explain away.
+#
+# Secrets are excluded by .dockerignore as well; both layers, because either
+# one alone is a single edit away from leaking again.
+FROM python:3.11-slim
+
+# Minimal, and pinned to what the portal serves with.
+RUN pip install --no-cache-dir \
+      fastapi==0.115.0 uvicorn==0.30.6 jinja2==3.1.4 python-multipart==0.0.9
+
+WORKDIR /app
+
+COPY decoy_app/ ./decoy_app/
+
+# Exactly what decoy_app imports, verified against its import list:
+#   telemetry            event logging
+#   operator_classifier  the bot/human gate
+#   verdict_db           schema and connection
+#   event_bus            imported by verdict_db
+COPY src/telemetry.py src/operator_classifier.py src/verdict_db.py \
+     src/event_bus.py ./src/
+
+# The code has to be here; the commentary does not. gate.py named the project
+# outright, and operator_classifier.py explained the bot/human test in prose an
+# attacker could simply read and rehearse against. Stripping leaves working
+# code that no longer teaches. Every module is imported afterwards to prove the
+# rewrite did not break it.
+COPY docker/strip_comments.py /tmp/strip_comments.py
+RUN python /tmp/strip_comments.py decoy_app src \
+ && rm -f /tmp/strip_comments.py \
+ && PYTHONPATH=/app/src python -c "import sys; sys.path.insert(0, 'decoy_app'); \
+      import telemetry, operator_classifier, verdict_db, event_bus, gate, \
+             honeytokens_gen" \
+ && ! grep -rqi "honeypot\|qeeqbox" /app
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    CH_SUBSTRATE=docker
+
+# Non-root, as attacker-facing code should be. uid/name look like an ordinary
+# service account rather than anything to do with this project.
+RUN useradd -m -u 10001 www-svc && chown -R www-svc:www-svc /app
+USER www-svc
+
+ENTRYPOINT ["python", "decoy_app/app.py"]

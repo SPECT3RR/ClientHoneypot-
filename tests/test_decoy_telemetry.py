@@ -10,7 +10,7 @@ import pytest
 
 import siem
 from decoy_telemetry import DecoyCollector, is_activity, match_planted
-from decoy_services import build_config
+from decoy_services import build_config, CONFIG_SECTION
 from verdict_db import VerdictDB
 from canary_vault import CanaryVault
 
@@ -70,9 +70,45 @@ def test_a_used_credential_keeps_working(vault):
     vault.record_hit(token["token_id"], src_ip="1.2.3.4")
     assert vault.for_placement("decoy_services") == [], "should now be burned"
 
-    ftp = build_config(vault)["honeypots"]["ftp"]
+    ftp = build_config(vault)[CONFIG_SECTION]["ftp"]
     assert ftp["password"] == "Fs01-Drop-9xK2!", \
         "a used credential was revoked; the attacker's next login would fail"
+
+
+def test_config_section_matches_the_vendored_package_name():
+    """The library is vendored under a neutral name and its config-section
+    string literal is renamed with it. If these two drift apart the section is
+    simply not found: every service falls back to a RANDOM high port, the
+    listeners still start, the log still says "Everything looks good!", and
+    nothing answers on 22 or 21. It failed exactly that way once."""
+    dockerfile = (Path(__file__).parent.parent / "docker"
+                  / "Dockerfile.honeypots").read_text(encoding="utf-8")
+    arg = next(l for l in dockerfile.splitlines() if l.startswith("ARG PKG="))
+    assert arg.split("=", 1)[1].strip() == CONFIG_SECTION, (
+        f"Dockerfile vendors as {arg}, decoy_services says {CONFIG_SECTION}")
+
+
+def test_the_decoy_image_carries_no_secrets_or_playbook():
+    """.dockerignore is the only thing standing between an attacker-facing
+    image and config/intel_keys.json. .gitignore does not apply to a docker
+    build context, and these were being baked in and shipped to the decoy."""
+    ignored = (Path(__file__).parent.parent
+               / ".dockerignore").read_text(encoding="utf-8")
+    for secret in ("config/intel_keys.json", "config/canary_tokens.json",
+                   "telemetry/", "tests/"):
+        assert secret in ignored, f"{secret} would be baked into images"
+
+    decoy_dockerfile = (Path(__file__).parent.parent / "docker"
+                        / "Dockerfile.decoy").read_text(encoding="utf-8")
+    # Only the COPY directives decide what reaches the image. Scanning the
+    # whole file catches the header comment, which names these modules for the
+    # express purpose of explaining why they are kept out.
+    copies = " ".join(l for l in decoy_dockerfile.splitlines()
+                      if l.strip().upper().startswith("COPY"))
+    assert "src/ " not in copies, "the whole src tree reaches the decoy"
+    for leaked in ("threat_scorer", "canary_vault", "decoy_telemetry",
+                   "dashboard/", "config/"):
+        assert leaked not in copies, f"{leaked} reaches the decoy"
 
 
 def test_nothing_in_the_config_names_a_siem(vault):

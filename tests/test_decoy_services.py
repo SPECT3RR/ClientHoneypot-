@@ -22,15 +22,15 @@ def test_planted_credential_becomes_the_accepted_credential(vault):
     vault.add("ssh_key", "Sup3rSecret-ssh", "decoy_services", label="corp-ssh")
     cfg = ds.build_config(vault)
 
-    assert cfg["honeypots"]["ssh"]["password"] == "Sup3rSecret-ssh"
-    assert cfg["honeypots"]["ssh"]["username"] == "corp_ssh"
+    assert cfg[ds.CONFIG_SECTION]["ssh"]["password"] == "Sup3rSecret-ssh"
+    assert cfg[ds.CONFIG_SECTION]["ssh"]["username"] == "corp_ssh"
 
 
 def test_db_credentials_seed_every_matching_engine(vault):
     vault.add("db_credential", "Fake!dbPassw0rd", "decoy_services", label="reporting")
     cfg = ds.build_config(vault)
     for engine in ("mysql", "postgres"):
-        assert cfg["honeypots"][engine]["password"] == "Fake!dbPassw0rd"
+        assert cfg[ds.CONFIG_SECTION][engine]["password"] == "Fake!dbPassw0rd"
 
 
 def test_services_without_a_token_still_answer(vault):
@@ -38,28 +38,28 @@ def test_services_without_a_token_still_answer(vault):
     the attacker that nothing is there."""
     cfg = ds.build_config(vault)
     for svc in ds.DEFAULT_SERVICES:
-        assert cfg["honeypots"][svc]["password"]
-        assert cfg["honeypots"][svc]["port"] == ds.DEFAULT_PORTS[svc]
+        assert cfg[ds.CONFIG_SECTION][svc]["password"]
+        assert cfg[ds.CONFIG_SECTION][svc]["port"] == ds.DEFAULT_PORTS[svc]
 
 
 def test_real_ports_are_used_not_high_ports(vault):
     # SSH on 2222 tells the attacker they are in a honeypot.
     cfg = ds.build_config(vault)
-    assert cfg["honeypots"]["ssh"]["port"] == 22
-    assert cfg["honeypots"]["mysql"]["port"] == 3306
-    assert cfg["honeypots"]["smb"]["port"] == 445
+    assert cfg[ds.CONFIG_SECTION]["ssh"]["port"] == 22
+    assert cfg[ds.CONFIG_SECTION]["mysql"]["port"] == 3306
+    assert cfg[ds.CONFIG_SECTION]["smb"]["port"] == 445
 
 
 def test_command_capture_is_enabled(vault):
     cfg = ds.build_config(vault)
-    assert "capture_commands" in cfg["honeypots"]["ssh"]["options"]
+    assert "capture_commands" in cfg[ds.CONFIG_SECTION]["ssh"]["options"]
 
 
 def test_aws_keys_are_not_given_a_local_port(vault):
     # An AWS canary fires through canarytokens.org; there is no local service.
     vault.add("aws_key", "AKIAFAKE", "decoy_services", label="aws")
     cfg = ds.build_config(vault)
-    assert all(h["password"] != "AKIAFAKE" for h in cfg["honeypots"].values())
+    assert all(h["password"] != "AKIAFAKE" for h in cfg[ds.CONFIG_SECTION].values())
 
 
 def test_config_writes_valid_json(vault, tmp_path):
@@ -69,7 +69,7 @@ def test_config_writes_valid_json(vault, tmp_path):
     # stdout, not a file: a log file needs a mount, and a mount is visible in
     # /proc/mounts to an attacker who lands a shell in the decoy.
     assert loaded["logs"] == "terminal,json"
-    assert "ssh" in loaded["honeypots"]
+    assert "ssh" in loaded[ds.CONFIG_SECTION]
 
 
 def test_a_captured_command_keeps_who_ran_it():

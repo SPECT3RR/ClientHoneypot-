@@ -1,0 +1,49 @@
+# .gitignore protects the repository. It does nothing for `docker build`,
+# which sends the whole directory as build context regardless -- so a file
+# git has never seen can still be baked into an image and shipped to a
+# container an attacker is standing in.
+#
+# It was. The decoy image contained config/intel_keys.json with live
+# VirusTotal, Google Safe Browsing and abuse.ch keys, and canary_tokens.json
+# with the bait list. An attacker who read the second one knew every token to
+# avoid; one who read the first got working API credentials.
+
+# Secrets. Never in any image.
+config/intel_keys.json
+config/canary_tokens.json
+config/profiles/
+config/persona_snapshots/
+
+# The generated decoy service config: it lists the credentials the decoy will
+# accept. It is written fresh into the container by scripts/deploy_decoy.py at
+# deploy time, so the copy on disk is vestigial -- but it was still being baked
+# into the hunter image, which renders attacker-controlled content. A hunter
+# that got compromised could read which logins the decoy honours, and that a
+# decoy exists at all.
+config/honeypots/
+
+# Collected intelligence and prior sessions.
+telemetry/
+reports/
+screenshots/
+logs/
+*.db
+*.jsonl
+
+# History and local state.
+.git/
+.gitignore
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# Operator-side material. A hunted session has no use for the tests that
+# describe every detection rule, or for the console that reads the verdicts.
+tests/
+docs/
+*.md
+needs_human_review.txt
+urls.txt
+targets.txt
