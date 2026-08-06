@@ -20,11 +20,11 @@ config/intel_keys.json
 # .example template is tracked instead.
 config/canary_tokens.json
 
-# Runtime databases and event streams — recreated per run, and the verdict DB
-# holds the live canary vault, so it is state, not source.
-telemetry/*.db
-telemetry/*.jsonl
-telemetry/samples/
+# Runtime state — recreated per run: databases (the verdict DB holds the live
+# canary vault), event streams, captured samples, and decoy service logs. The
+# whole tree is runtime; keep the dir with a .gitkeep.
+telemetry/*
+!telemetry/.gitkeep
 *.quar
 
 # Other runtime-generated artifacts (recreated per session)
