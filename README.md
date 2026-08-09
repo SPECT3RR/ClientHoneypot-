@@ -78,21 +78,64 @@ run the system. On Linux the equivalent host-isolation is an `iptables`/`ufw`
 rule blocking the Docker bridge from host services; the decoys are already
 contained on an internal network regardless.
 
-The decoy images are built once per machine (rebuild on Ubuntu after cloning):
+### Ubuntu — full setup from a clean clone
 
 ```bash
+# 1. Docker Engine, and your user in the docker group (log out/in after)
+sudo apt install -y docker.io docker-compose-v2
+sudo usermod -aG docker "$USER"
+
+# 2. Python side
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+playwright install --with-deps chromium      # --with-deps pulls the libs Ubuntu needs
+
+# 3. Your own canary token (the committed file is only a template)
+cp config/canary_tokens.json.example config/canary_tokens.json
+$EDITOR config/canary_tokens.json            # paste a free token from canarytokens.org
+
+# 4. Build the four images (they are not published; build once per machine)
 docker build -f docker/Dockerfile.honeypots -t clienthoneypot/decoy-services:latest .
 docker build -f docker/Dockerfile.decoy     -t clienthoneypot/decoy-web:latest .
 docker build -f docker/Dockerfile.cowrie    -t clienthoneypot/decoy-shell:latest .
 docker build -f docker/Dockerfile           -t clienthoneypot/hunter:latest .
 
-python scripts/deploy_decoy.py        # stand up all three decoys, contained + verified
-python src/decoy_telemetry.py         # covert telemetry + sample capture, host-side
+# 5. Stand up the decoys — contained, disguised, and verified from the inside
+python scripts/deploy_decoy.py
+
+# 6. Covert telemetry + payload capture (host-side; nothing runs in the decoy)
+python src/decoy_telemetry.py
+
+# 7. Console -> http://127.0.0.1:8000
+python dashboard/app.py
 ```
 
-Copy `config/canary_tokens.json.example` to `config/canary_tokens.json` and
-paste your own free token from canarytokens.org. See `OPERATING.md` for the
-decoy tiers, the covert Wazuh telemetry, sample capture, and the kill-chain map.
+**The console now needs a token.** It is minted on first run and printed here:
+
+```bash
+cat config/dashboard_token
+```
+
+Paste it into the unlock page, or send it as `Authorization: Bearer <token>`
+from the RBI modules and any script that calls `/api/verdict`.
+
+**Wazuh** needs the manager-side rules, or every finding arrives at the
+manager's default level instead of the one the code intends:
+
+```bash
+docker cp wazuh/rules/clienthoneypot_rules.xml <manager>:/var/ossec/etc/rules/
+docker exec <manager> chown wazuh:wazuh /var/ossec/etc/rules/clienthoneypot_rules.xml
+docker exec <manager> /var/ossec/bin/wazuh-control restart
+# then confirm a real event matches rule 100101-100120:
+docker exec -i <manager> /var/ossec/bin/wazuh-logtest < <(tail -1 telemetry/siem.jsonl)
+```
+
+Run the SIEM on a **separate host** from the decoys — a manager plus the decoy
+stack did not fit in 7.7 GB during testing (see `docs/ASSESSMENT.md`).
+
+See `OPERATING.md` for the decoy tiers, covert telemetry, sample capture and
+the kill-chain map, and `docs/ASSESSMENT.md` for what black-box testing found,
+what was fixed, and what is still open.
 
 ## Quick start
 

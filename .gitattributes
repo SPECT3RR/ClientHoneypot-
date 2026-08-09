@@ -1,0 +1,30 @@
+# This repo is developed on Windows and deployed on Linux. Without this, a
+# working tree checked out on Windows can commit CRLF, and a CRLF shell script
+# or config fails on Ubuntu in ways that are painful to diagnose ("bad
+# interpreter: /bin/bash^M").
+#
+# Normalise everything text to LF in the repository. Git still gives Windows
+# users CRLF in their working tree when core.autocrlf says so; what changes is
+# what gets stored and therefore what Linux checks out.
+* text=auto eol=lf
+
+# Files that MUST be LF wherever they land: they are read by Linux tooling
+# inside containers, or by a shell.
+*.sh        text eol=lf
+*.py        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.cfg       text eol=lf
+*.xml       text eol=lf
+*.json      text eol=lf
+Dockerfile* text eol=lf
+
+# Windows-only helpers: CRLF is correct for these, and PowerShell is happier.
+*.ps1       text eol=crlf
+
+# Never touched.
+*.png       binary
+*.jpg       binary
+*.db        binary
+*.pickle    binary
+*.quar      binary

@@ -349,9 +349,49 @@ EGRESS_PROBES = {
     "the LAN gateway (192.168.1.1:80)": ("192.168.1.1", 80),
 }
 
+# `host.docker.internal` is a Docker Desktop convenience. On Docker Engine for
+# Linux -- i.e. any real deployment -- the name does not resolve, so that probe
+# fails with gaierror and reports "blocked" while telling us nothing: it never
+# tried to reach the host at all. The host is at the network's GATEWAY there.
+#
+# So the probe reads its own default gateway from /proc/net/route and tests
+# that too. This is the check that actually means "the decoy cannot reach the
+# machine it runs on", and it is the same check on both platforms.
+GATEWAY_PROBE = "the host via the default gateway"
+
 PROBE_SRC = """
-import socket, json
+import socket, json, struct
 out = {}
+
+
+def default_gateway():
+    try:
+        with open("/proc/net/route") as fh:
+            for line in fh.readlines()[1:]:
+                f = line.split()
+                if f[1] == "00000000":          # destination 0.0.0.0
+                    return socket.inet_ntoa(struct.pack("<L", int(f[2], 16)))
+    except OSError:
+        pass
+    return None
+
+
+gw = default_gateway()
+out["_gateway"] = gw or "none (no default route at all)"
+if gw:
+    reached = []
+    for port in (22, 80, 443, 8000, 8001):
+        try:
+            socket.create_connection((gw, port), timeout=2).close()
+            reached.append(port)
+        except Exception:
+            pass
+    out["%s"] = ("REACHABLE on " + str(reached)) if reached else "blocked"
+else:
+    # An internal Docker network gives the container no default route, which
+    # is the strongest possible answer: there is nowhere for traffic to go.
+    out["%s"] = "blocked"
+
 for name, (h, p) in %s.items():
     try:
         socket.create_connection((h, p), timeout=3).close()
@@ -366,21 +406,26 @@ def verify_containment(container: str) -> tuple:
     """Attack the containment from inside. Reachable is a failure."""
     probes = {k: list(v) for k, v in EGRESS_PROBES.items()}
     out = subprocess.run(
-        ["docker", "exec", container, "timeout", "25", "python", "-c",
-         PROBE_SRC % json.dumps(probes)],
-        capture_output=True, text=True, timeout=90)
+        ["docker", "exec", container, "timeout", "30", "python", "-c",
+         PROBE_SRC % (GATEWAY_PROBE, GATEWAY_PROBE, json.dumps(probes))],
+        capture_output=True, text=True, timeout=120)
     line = next((l for l in out.stdout.splitlines() if l.startswith("{")), None)
     if not line:
         return False, [f"probe did not run: {(out.stderr or out.stdout).strip()[:200]}"]
 
     results = json.loads(line)
+    gateway = results.pop("_gateway", "unknown")
     findings, ok = [], True
     for name, result in results.items():
-        if result == "REACHABLE":
+        if str(result).startswith("REACHABLE"):
             ok = False
-            findings.append(f"  FAIL  {name}: REACHABLE")
+            findings.append(f"  FAIL  {name}: {result}")
         else:
             findings.append(f"  ok    {name}: blocked ({result})")
+    # Printed either way: on Docker Desktop the name-based host probe fails to
+    # resolve and proves nothing, so the gateway line is the one that carries
+    # the real answer -- and on Linux it is the only one that does.
+    findings.append(f"  info  default route from inside: {gateway}")
     return ok, findings
 
 
