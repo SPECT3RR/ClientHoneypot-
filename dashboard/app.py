@@ -10,6 +10,7 @@ Run:
 Then open http://127.0.0.1:8000
 """
 import asyncio
+import hmac
 import json
 import sys
 from pathlib import Path
@@ -19,7 +20,8 @@ import io
 import re
 
 from fastapi import FastAPI, Request, Form, UploadFile, File
-from fastapi.responses import HTMLResponse, StreamingResponse, RedirectResponse
+from fastapi.responses import (HTMLResponse, StreamingResponse,
+                               RedirectResponse, JSONResponse)
 from fastapi.templating import Jinja2Templates
 
 ROOT = Path(__file__).parent.parent
@@ -41,6 +43,7 @@ from audit import AuditLog                     # noqa: E402
 import siem                                    # noqa: E402
 import killchain                               # noqa: E402
 from sample_capture import SampleStore         # noqa: E402
+import console_auth                            # noqa: E402
 import urllib.request                          # noqa: E402
 
 DECOY_BASE = "http://127.0.0.1:8001"
@@ -62,6 +65,9 @@ SIEM = siem.SiemExporter(mode='jsonl')
 # Captured attacker payloads (defanged on disk) and the kill-chain map, both
 # read-only here — the capture itself runs in the collector process.
 SAMPLES = SampleStore()
+# Minted on first run into config/dashboard_token (gitignored). Every route
+# except the login page requires it — see the middleware below.
+CONSOLE_TOKEN = console_auth.load_or_create_token()
 SUBSTRATE = substrate_mod.load()
 # Headed by default: a human cannot take over a headless browser, so running
 # headless silently makes the intervention queue unable to do its job.
@@ -237,12 +243,54 @@ def _pending_with_contacts(limit: int = 12) -> list:
 
 
 def _client(request) -> str:
-    """Caller address for the audit trail. Without auth this is all the
-    identity there is, and saying so is better than pretending otherwise."""
+    """Caller address for the audit trail. There is one console token rather
+    than per-user accounts, so the address is still the distinguishing detail
+    in an entry — but a request now at least proves it held the token."""
     try:
         return request.client.host if request and request.client else None
     except Exception:
         return None
+
+
+@app.middleware("http")
+async def require_console_token(request: Request, call_next):
+    """Fail closed: everything needs the token except the login page.
+
+    Middleware, not a per-route dependency, because a dependency has to be
+    remembered on each of the 24 routes and on every route added later. This
+    protects new endpoints by default — the failure mode of forgetting is a
+    locked door, not an open one.
+    """
+    path = request.url.path
+    if console_auth.is_public(path) or console_auth.is_authenticated(
+            request, CONSOLE_TOKEN):
+        return await call_next(request)
+
+    # Browsers get the unlock page; scripts and the API get a clean 401.
+    accepts_html = "text/html" in (request.headers.get("accept") or "")
+    if accepts_html and request.method == "GET":
+        return HTMLResponse(console_auth.LOGIN_HTML.format(error=""),
+                            status_code=401)
+    return JSONResponse({"error": "console token required"}, status_code=401)
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_form():
+    return console_auth.LOGIN_HTML.format(error="")
+
+
+@app.post("/login")
+async def login(request: Request, token: str = Form("")):
+    if not hmac.compare_digest(token.strip(), CONSOLE_TOKEN):
+        AUDIT.record("console.login_failed", source=_client(request))
+        return HTMLResponse(
+            console_auth.LOGIN_HTML.format(
+                error='<div class="err">Wrong token.</div>'), status_code=401)
+    response = RedirectResponse("/", status_code=303)
+    response.set_cookie(console_auth.COOKIE, CONSOLE_TOKEN, httponly=True,
+                        samesite="strict", max_age=86400)
+    AUDIT.record("console.login", source=_client(request))
+    return response
 
 
 def _third_party_view(limit: int = 20) -> list:

@@ -12,9 +12,11 @@ sink is opened in append mode — a log an operator can quietly edit is not an
 audit log. The database copy is what the dashboard reads; the file copy is
 what survives the database being replaced.
 
-Actor is whoever the dashboard says it is. There is no authentication yet, so
-today that is always "operator" plus a source address. When auth lands the
-actor becomes real and nothing else here changes.
+Actor is whoever the dashboard says it is. The console is single-operator and
+gated by one shared token (see console_auth), so an entry proves the caller
+held that token — it does not distinguish between two people who both have it.
+The source address is still the distinguishing detail, and saying so is better
+than implying an identity the system does not have.
 """
 import json
 import time
@@ -63,13 +65,16 @@ ACTIONS = {
     "container.resume":     "resumed paused containers",
     # a captured attacker payload leaving the store
     "sample.retrieve":      "downloaded a captured malware sample",
+    # console access
+    "console.login":        "unlocked the console",
+    "console.login_failed": "failed a console unlock",
 }
 
 # Actions that change recorded truth or reduce isolation. Called out so a
 # reviewer can find them without reading the whole log.
 SENSITIVE = {"triage.confirm", "triage.reject", "swarm.kill",
              "intel.key.set", "intel.key.remove", "container.pause",
-             "sample.retrieve"}
+             "sample.retrieve", "console.login_failed"}
 
 
 class AuditLog:

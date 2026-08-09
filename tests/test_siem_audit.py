@@ -192,12 +192,22 @@ def test_wazuh_agent_config_is_pasteable():
 
 @pytest.fixture
 def client():
+    """An AUTHENTICATED console client.
+
+    The console now requires a token on every route, so these tests carry one:
+    what they are checking is operator behaviour, not the door. The door has
+    its own tests in test_console_auth_and_wazuh.py, which assert that the same
+    endpoints refuse a caller without it.
+    """
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).parent.parent / "dashboard"))
     from fastapi.testclient import TestClient
     import app as dashboard_app
-    return TestClient(dashboard_app.app), dashboard_app
+    client = TestClient(
+        dashboard_app.app,
+        headers={"Authorization": f"Bearer {dashboard_app.CONSOLE_TOKEN}"})
+    return client, dashboard_app
 
 
 def test_every_audited_endpoint_actually_responds(client):

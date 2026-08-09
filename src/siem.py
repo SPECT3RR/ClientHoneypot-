@@ -350,10 +350,25 @@ class SiemExporter:
 
 
 def wazuh_agent_config(path: Path = None) -> str:
-    """The block to paste into ossec.conf so a Wazuh agent picks this up."""
+    """The block to paste into ossec.conf so a Wazuh agent picks this up.
+
+    Half the integration. The agent ships the lines; the MANAGER still needs
+    wazuh/rules/clienthoneypot_rules.xml, or every finding arrives decoded but
+    unmatched and lands at the default level for JSON. The severity we set in
+    EVENTS is a field in the payload, not Wazuh's alert level -- only a rule
+    sets that. Testing against a real manager is what surfaced this.
+    """
     log = Path(path or SIEM_LOG)
-    return f"""<!-- ClientHoneypot findings -->
+    return f"""<!-- ClientHoneypot findings. AGENT side (this host). -->
 <localfile>
   <log_format>json</log_format>
   <location>{log}</location>
-</localfile>"""
+</localfile>
+
+<!-- MANAGER side, required or these events never reach their real level:
+       cp wazuh/rules/clienthoneypot_rules.xml /var/ossec/etc/rules/
+       chown wazuh:wazuh /var/ossec/etc/rules/clienthoneypot_rules.xml
+       /var/ossec/bin/wazuh-control restart
+     Regenerate after changing siem.EVENTS:
+       python scripts/gen_wazuh_rules.py
+-->"""

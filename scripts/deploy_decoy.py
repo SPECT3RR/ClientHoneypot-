@@ -259,12 +259,29 @@ SHELL_HOSTNAME = "asteria-app02"
 SHELL_USERDB = "/cowrie/cowrie-git/etc/userdb.txt"
 
 
+# Weak but PLAUSIBLE passwords the brute-force accounts accept.
+#
+# These used to be `root:x:*` and `admin:x:*`, meaning any password at all was
+# accepted. That is the single most famous honeypot tell, and black-box testing
+# confirmed it: one `ssh root@host` with eight random bytes as the password got
+# a shell. No real server behaves that way, so an attacker learns what this is
+# before they do anything worth recording.
+#
+# A fixed list keeps the engagement -- a real brute-force run still lands,
+# because these are genuinely among the most-tried passwords -- while a random
+# string now fails, exactly as it would on a badly-administered real host.
+BRUTE_PASSWORDS = ["123456", "password", "admin", "root", "toor", "P@ssw0rd",
+                   "12345678", "qwerty", "letmein", "changeme", "admin123",
+                   "Passw0rd!", "1qaz2wsx", "welcome1"]
+
+
 def build_userdb(vault) -> str:
     """Cowrie userdb.txt from the canary vault: a stolen ssh credential works.
 
-    `user:x:pass` accepts that exact pair; `user:x:*` accepts any password.
-    The permissive root/admin lines lure opportunistic brute force too -- and
-    every login, planted or brute, is captured either way.
+    `user:x:pass` accepts that exact pair. Wildcards are deliberately NOT used
+    -- see BRUTE_PASSWORDS. Every login, planted or brute-forced, is captured
+    either way; the difference is whether the attacker can tell what they are
+    standing in.
     """
     lines = []
     if vault:
@@ -274,7 +291,9 @@ def build_userdb(vault) -> str:
                 label = (t.get("label") or "svc").replace("-", "_")
                 user = "".join(c for c in label if c.isalnum() or c == "_") or "svc"
                 lines.append(f"{user}:x:{t['value']}")
-    lines += ["root:x:*", "admin:x:*"]
+    for account in ("root", "admin", "ubuntu", "deploy"):
+        for password in BRUTE_PASSWORDS:
+            lines.append(f"{account}:x:{password}")
     return "\n".join(lines) + "\n"
 
 

@@ -42,3 +42,6 @@ decoy_app/honeytokens/*.ovpn
 # Generated decoy service config: lists the credentials the decoy accepts.
 # Written into the container at deploy time; the on-disk copy is vestigial.
 config/honeypots/
+
+# Console token — minted on first run, never committed.
+config/dashboard_token
