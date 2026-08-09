@@ -1,3 +1,8 @@
+# Requires Python 3.10-3.12. NOT 3.13: playwright 1.45.0 pins
+# greenlet==3.0.3, which has no cp313 wheel and fails to compile against
+# 3.13 (_PyCFrame removed, tstate->cframe restructured). Build the venv
+# from a 3.12 interpreter; `conda deactivate` first if conda is active.
+
 playwright==1.45.0
 playwright-stealth==2.0.0
 pyyaml==6.0.1

@@ -59,11 +59,30 @@ what to build or bring in next (see "Roadmap").
 
 ## Requirements
 
-- Python 3.10+
+- **Python 3.10 – 3.12.** Not 3.13: Playwright 1.45.0 hard-pins
+  `greenlet==3.0.3`, which has no cp313 wheel and cannot compile against
+  Python 3.13 (that release removed `_PyCFrame` and restructured
+  `tstate->cframe`, so the build dies in `greenlet.cpp`). If you use conda,
+  `conda deactivate` first — a venv created from a conda 3.13 inherits its
+  headers and hits exactly this.
 - `pip install -r requirements.txt`
 - `playwright install chromium`
 - Docker (Docker Desktop on Windows/macOS, Docker Engine on Linux) for the
   contained hunter and the decoy tiers
+
+Check before creating the venv:
+
+```bash
+/usr/bin/python3 --version      # want 3.10, 3.11 or 3.12
+```
+
+If the system Python is 3.13, install 3.12 alongside it and build the venv
+from that: `sudo apt install -y python3.12 python3.12-venv`, then
+`python3.12 -m venv .venv`.
+
+This only constrains the **host**. The container images pin their own
+interpreters (`playwright/python:v1.45.0-jammy`, `python:3.11-slim`), so the
+hunters and decoys are unaffected by whatever the host runs.
 
 ### Platform — Linux and Windows
 
