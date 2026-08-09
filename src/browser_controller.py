@@ -82,8 +82,22 @@ class BrowserSession:
         # initialise, and launch fails with TargetClosedError. The container
         # and the WSL2 VM around it are the real boundary there, so the inner
         # sandbox is the right thing to give up — but only when contained.
+        #
+        # Running as root on Linux is the third case, and it is how Kali is
+        # normally used. Chromium refuses to start as uid 0 with its sandbox
+        # enabled, so without this the launch dies as a bare TargetClosedError
+        # that says nothing about the cause. The local substrate already
+        # refuses any target that is not loopback, so the exposure here is
+        # bounded -- but hunting real URLs as root on the host is still the
+        # wrong way round, and the warning says so.
         ignore = ["--enable-automation"]
+        as_root = hasattr(os, "geteuid") and os.geteuid() == 0
         if _in_container():
+            args.append("--no-sandbox")
+        elif as_root:
+            print("[browser] running as root: Chromium cannot use its sandbox, "
+                  "so --no-sandbox is being set. Prefer a non-root user, or "
+                  "the docker substrate for anything but loopback targets.")
             args.append("--no-sandbox")
         else:
             ignore.append("--no-sandbox")

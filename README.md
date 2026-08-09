@@ -133,6 +133,48 @@ docker exec -i <manager> /var/ossec/bin/wazuh-logtest < <(tail -1 telemetry/siem
 Run the SIEM on a **separate host** from the decoys — a manager plus the decoy
 stack did not fit in 7.7 GB during testing (see `docs/ASSESSMENT.md`).
 
+### Kali (and other Debian-based distros)
+
+Kali runs the same system — it is Debian-based, and everything here is Python
+plus Docker. Three differences are worth knowing before you start:
+
+```bash
+# 1. Package names differ from Ubuntu. Kali ships docker.io; the compose
+#    plugin is packaged as docker-compose (v1 CLI) unless you add Docker's
+#    own repo. Nothing here requires compose: the decoys are deployed by
+#    scripts/deploy_decoy.py, and compose only builds/tags images.
+sudo apt update && sudo apt install -y docker.io
+sudo systemctl enable --now docker
+
+# 2. `playwright install --with-deps` frequently fails on Kali, because the
+#    dependency list resolves to Ubuntu package names that Kali's rolling
+#    repos do not match. Install the browser without --with-deps, and add the
+#    libraries yourself if Chromium complains at launch.
+playwright install chromium
+sudo apt install -y libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
+    libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
+    libxrandr2 libgbm1 libasound2t64 || \
+sudo apt install -y libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
+    libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
+    libxrandr2 libgbm1 libasound2
+```
+
+**3. Do not hunt as root.** Kali is often used as root, and Chromium will not
+start as uid 0 with its sandbox on. The code detects this and sets
+`--no-sandbox` so it runs at all, but that removes a real boundary. For
+anything beyond loopback targets use the docker substrate (`config/runtime.yaml`),
+which is the supported path anyway:
+
+```bash
+sudo useradd -m -G docker hunter && sudo -iu hunter   # then run from there
+```
+
+Everything else — the decoys, covert telemetry, sample capture, the Wazuh
+rules — is identical to the Ubuntu instructions above. The container images
+pin their own bases (`playwright/python:v1.45.0-jammy`, `python:3.11-slim`,
+`cowrie/cowrie`), so what runs inside them does not depend on the host distro
+at all; only the four host-side Python packages and Docker do.
+
 See `OPERATING.md` for the decoy tiers, covert telemetry, sample capture and
 the kill-chain map, and `docs/ASSESSMENT.md` for what black-box testing found,
 what was fixed, and what is still open.
