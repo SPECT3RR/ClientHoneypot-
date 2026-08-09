@@ -70,15 +70,36 @@ what to build or bring in next (see "Roadmap").
 - Docker (Docker Desktop on Windows/macOS, Docker Engine on Linux) for the
   contained hunter and the decoy tiers
 
-Check before creating the venv:
+Check before creating the environment:
 
 ```bash
 /usr/bin/python3 --version      # want 3.10, 3.11 or 3.12
 ```
 
-If the system Python is 3.13, install 3.12 alongside it and build the venv
-from that: `sudo apt install -y python3.12 python3.12-venv`, then
-`python3.12 -m venv .venv`.
+**If the system Python is 3.13 or newer** (recent distros ship 3.14), get a
+3.12 interpreter alongside it. On a distro that new, `python3.12` is often not
+in apt at all, so conda is usually the path of least resistance — and because
+every dependency has a cp312 wheel, nothing compiles:
+
+```bash
+conda create -n clienthoneypot python=3.12 -y
+conda activate clienthoneypot
+pip install -r requirements.txt
+```
+
+Without conda, use the deadsnakes PPA and a venv:
+
+```bash
+sudo add-apt-repository -y ppa:deadsnakes/ppa && sudo apt update
+sudo apt install -y python3.12 python3.12-venv
+python3.12 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Mixing conda and a venv is what causes trouble, not conda itself: a venv built
+*from* a conda interpreter compiles against conda headers with the system
+compiler. Pick one — a conda env, or a venv from a system Python — and stay in
+it.
 
 This only constrains the **host**. The container images pin their own
 interpreters (`playwright/python:v1.45.0-jammy`, `python:3.11-slim`), so the

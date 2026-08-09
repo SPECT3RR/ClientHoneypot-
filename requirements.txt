@@ -1,7 +1,10 @@
 # Requires Python 3.10-3.12. NOT 3.13: playwright 1.45.0 pins
 # greenlet==3.0.3, which has no cp313 wheel and fails to compile against
 # 3.13 (_PyCFrame removed, tstate->cframe restructured). Build the venv
-# from a 3.12 interpreter; `conda deactivate` first if conda is active.
+# from a 3.12 interpreter. On a distro shipping 3.13/3.14, python3.12 is
+# often not in apt: `conda create -n clienthoneypot python=3.12` is the
+# quickest route, and every dependency has a cp312 wheel so nothing builds.
+# Do not create a venv FROM a conda interpreter -- pick one or the other.
 
 playwright==1.45.0
 playwright-stealth==2.0.0
