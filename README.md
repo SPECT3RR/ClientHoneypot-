@@ -1,4 +1,4 @@
-# Thug Deception Platform (MVP)
+# ClientHoneypot MVP
 
 A research honeyclient platform: a browser that presents itself as a believable
 enterprise employee workstation, browses candidate URLs, watches for malicious
